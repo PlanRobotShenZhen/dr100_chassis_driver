@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- 底盘控制器节点 -->
+    <node name="chassis_controller" pkg="dr100_chassis_driver" type="chassis_controller" output="screen">
+        <!-- 串口参数 -->
+        <param name="port" value="/tmp/ttyV1" />
+        <param name="baudrate" value="115200" />
+        
+        <!-- 速度限制参数 -->
+        <param name="max_linear_velocity" value="2.0" />
+        <param name="max_angular_velocity" value="2.0" />
+        
+        <!-- 控制参数 -->
+        <param name="motor_enable" value="true" />
+        <param name="cmd_timeout" value="1.0" />
+
+        <!-- 话题名称参数 -->
+        <param name="cmd_vel_topic" value="/cmd_vel" />
+        <param name="odom_topic" value="/odom" />
+
+        <!-- 坐标系参数 -->
+        <param name="odom_frame_id" value="odom" />
+        <param name="base_frame_id" value="base_link" />
+
+        <!-- 里程计发布频率参数 -->
+        <param name="odom_publish_rate" value="50.0" />
+
+        <!-- 重连参数 -->
+        <param name="reconnect_interval" value="2.0" />
+        <param name="max_reconnect_attempts" value="-1" />
+    </node>
+</launch>
