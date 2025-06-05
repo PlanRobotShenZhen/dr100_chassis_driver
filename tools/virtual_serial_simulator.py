@@ -68,6 +68,10 @@ def parse_control_packet(data):
         print(f"校验码错误: 期望 0x{checksum:02X}, 收到 0x{data[15]:02X}")
         return None
 
+    # 如果校验通过，则输出获取的数据
+    hex_str = ' '.join(f'{byte:02X}' for byte in data)
+    print(f"接收到的数据帧: {hex_str}")
+    
     # 解析速度数据（放大1000倍的int16）
     x_velocity_raw = struct.unpack('<h', data[4:6])[0]
     y_velocity_raw = struct.unpack('<h', data[6:8])[0]
@@ -84,7 +88,10 @@ def parse_control_packet(data):
         'light_control': data[3],
         'x_velocity': x_velocity,
         'y_velocity': y_velocity,
-        'z_velocity': z_velocity
+        'z_velocity': z_velocity,
+        'ultrasonic_switch': data[10],
+        'charge_switch': data[11],
+        'lidar_switch': data[12]
     }
 
 
@@ -213,6 +220,11 @@ class VirtualSerialSimulator:
 
         # 接收缓冲区
         self.receive_buffer = bytearray()
+
+        # 用于检测速度变化的上一次速度值
+        self.last_velocity = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        # 用于检测发送速度反馈变化的上一次速度值
+        self.last_feedback_velocity = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         
     def create_virtual_serial_ports(self):
         """创建虚拟串口对"""
@@ -279,6 +291,13 @@ class VirtualSerialSimulator:
                         # 解析控制数据包
                         control_data = parse_control_packet(packet_data)
                         if control_data:
+                            # 检查速度是否发生变化
+                            velocity_changed = (
+                                abs(control_data['x_velocity'] - self.last_velocity['x']) > 0.001 or
+                                abs(control_data['y_velocity'] - self.last_velocity['y']) > 0.001 or
+                                abs(control_data['z_velocity'] - self.last_velocity['z']) > 0.001
+                            )
+
                             # 更新速度反馈
                             self.data_frame['x_velocity'] = control_data['x_velocity']
                             self.data_frame['y_velocity'] = control_data['y_velocity']
@@ -287,8 +306,33 @@ class VirtualSerialSimulator:
                             # 更新电机使能状态
                             self.data_frame['motor_enable'] = control_data['motor_enable']
 
-                            print(f"接收到速度命令: x={control_data['x_velocity']:.3f}, "
-                                  f"y={control_data['y_velocity']:.3f}, z={control_data['z_velocity']:.3f}")
+                            # 显示开关状态变化
+                            switch_status = []
+                            if control_data['light_control'] != 0:
+                                status = "开启" if control_data['light_control'] == 1 else "关闭"
+                                switch_status.append(f"车灯:{status}")
+                            if control_data['ultrasonic_switch'] != 0:
+                                status = "开启" if control_data['ultrasonic_switch'] == 1 else "关闭"
+                                switch_status.append(f"超声波:{status}")
+                            if control_data['charge_switch'] != 0:
+                                status = "开启" if control_data['charge_switch'] == 1 else "关闭"
+                                switch_status.append(f"充电:{status}")
+                            if control_data['lidar_switch'] != 0:
+                                status = "开启" if control_data['lidar_switch'] == 1 else "关闭"
+                                switch_status.append(f"雷达:{status}")
+
+                            if switch_status:
+                                print(f"设备控制: {', '.join(switch_status)}")
+
+                            # 只在速度变化时输出
+                            if velocity_changed:
+                                print(f"接收到速度命令: x={control_data['x_velocity']:.3f}, "
+                                      f"y={control_data['y_velocity']:.3f}, z={control_data['z_velocity']:.3f}")
+
+                                # 更新上一次速度值
+                                self.last_velocity['x'] = control_data['x_velocity']
+                                self.last_velocity['y'] = control_data['y_velocity']
+                                self.last_velocity['z'] = control_data['z_velocity']
                     else:
                         break
 
@@ -325,12 +369,22 @@ class VirtualSerialSimulator:
                 # hex_str = ' '.join(f'{byte:02X}' for byte in frame)
                 # print(f"发送的数据帧: {hex_str}")
 
-                # 只在有速度时显示详细信息
-                if (abs(self.data_frame['x_velocity']) > 0.001 or
-                    abs(self.data_frame['y_velocity']) > 0.001 or
-                    abs(self.data_frame['z_velocity']) > 0.001):
+                # 检查发送速度反馈是否发生变化
+                feedback_velocity_changed = (
+                    abs(self.data_frame['x_velocity'] - self.last_feedback_velocity['x']) > 0.001 or
+                    abs(self.data_frame['y_velocity'] - self.last_feedback_velocity['y']) > 0.001 or
+                    abs(self.data_frame['z_velocity'] - self.last_feedback_velocity['z']) > 0.001
+                )
+
+                # 只在速度反馈发生变化时输出
+                if feedback_velocity_changed:
                     print(f"发送速度反馈: x={self.data_frame['x_velocity']:.3f}, "
                           f"y={self.data_frame['y_velocity']:.3f}, z={self.data_frame['z_velocity']:.3f}")
+
+                    # 更新上一次反馈速度值
+                    self.last_feedback_velocity['x'] = self.data_frame['x_velocity']
+                    self.last_feedback_velocity['y'] = self.data_frame['y_velocity']
+                    self.last_feedback_velocity['z'] = self.data_frame['z_velocity']
 
                 time.sleep(0.1)  # 每100ms发送一次
 

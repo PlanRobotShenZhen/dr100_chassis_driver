@@ -10,6 +10,9 @@ ChassisController::ChassisController()
     , is_initialized_(false)
     , shutdown_requested_(false)
     , motor_enable_(true)
+    , current_linear_x_(0.0)
+    , current_linear_y_(0.0)
+    , current_angular_z_(0.0)
 {
     // 获取参数
     private_nh_.param<std::string>("port", port_name_, "/tmp/ttyV1");
@@ -27,9 +30,15 @@ ChassisController::ChassisController()
     private_nh_.param("odom_publish_rate", odom_publish_rate_, 50.0);
     private_nh_.param<std::string>("battery_topic", battery_topic_, "/battery_state");
     private_nh_.param("battery_publish_rate", battery_publish_rate_, 10.0);
+    private_nh_.param<std::string>("light_topic", light_topic_, "/light_switch");
+    private_nh_.param<std::string>("ultrasonic_topic", ultrasonic_topic_, "/ultrasonic_switch");
+    private_nh_.param<std::string>("charge_topic", charge_topic_, "/charge_switch");
+    private_nh_.param<std::string>("lidar_topic", lidar_topic_, "/lidar_switch");
 
     ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, battery_rate=%.1fHz",
              port_name_.c_str(), baudrate_, odom_publish_rate_, battery_publish_rate_);
+    ROS_INFO("Device control topics: light=%s, ultrasonic=%s, charge=%s, lidar=%s",
+             light_topic_.c_str(), ultrasonic_topic_.c_str(), charge_topic_.c_str(), lidar_topic_.c_str());
     ROS_INFO("Note: Program will continue running even if serial port is not available");
 }
 
@@ -45,6 +54,7 @@ bool ChassisController::initialize()
         serial_comm_ = std::make_unique<SerialCommunication>();
         odom_publisher_ = std::make_unique<OdometryPublisher>();
         battery_monitor_ = std::make_unique<BatteryMonitor>();
+        device_control_ = std::make_unique<DeviceControl>();
 
         // 初始化串口通信模块（总是成功，即使串口不存在）
         serial_comm_->initialize(port_name_, baudrate_, reconnect_interval_, max_reconnect_attempts_);
@@ -66,6 +76,16 @@ bool ChassisController::initialize()
             ROS_ERROR("Failed to initialize battery monitor");
             return false;
         }
+
+        // 初始化设备控制模块
+        if (!device_control_->initialize(nh_, light_topic_, ultrasonic_topic_, charge_topic_, lidar_topic_)) {
+            ROS_ERROR("Failed to initialize device control");
+            return false;
+        }
+
+        // 设置设备状态更新回调
+        device_control_->setDeviceStateCallback(
+            std::bind(&ChassisController::onDeviceStateChanged, this));
 
         // 初始化ROS组件
         cmd_vel_sub_ = nh_.subscribe(cmd_vel_topic_, 1, &ChassisController::cmdVelCallback, this);
@@ -97,6 +117,7 @@ void ChassisController::run()
     serial_comm_->start();
     odom_publisher_->start();
     battery_monitor_->start();
+    device_control_->start();
 
     ROS_INFO("ChassisController started");
 
@@ -115,6 +136,10 @@ void ChassisController::run()
         // 命令超时检查
         const auto time_since_last_cmd = (now - last_cmd_time_).toSec();
         if (time_since_last_cmd > cmd_timeout_) {
+            // 更新当前速度状态为0
+            current_linear_x_.store(0.0);
+            current_linear_y_.store(0.0);
+            current_angular_z_.store(0.0);
             serial_comm_->sendControlPacket(stop_packet);
         }
 
@@ -153,6 +178,7 @@ void ChassisController::shutdown()
     if (serial_comm_) serial_comm_->stop();
     if (odom_publisher_) odom_publisher_->stop();
     if (battery_monitor_) battery_monitor_->stop();
+    if (device_control_) device_control_->stop();
     if (spinner_) spinner_->stop();
 
     ROS_INFO("Shutdown complete");
@@ -166,6 +192,11 @@ void ChassisController::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg
     const auto linear_x = clampValue(msg->linear.x, max_linear_velocity_);
     const auto linear_y = clampValue(msg->linear.y, max_linear_velocity_);
     const auto angular_z = clampValue(msg->angular.z, max_angular_velocity_);
+
+    // 更新当前速度状态
+    current_linear_x_.store(linear_x);
+    current_linear_y_.store(linear_y);
+    current_angular_z_.store(angular_z);
 
     const auto packet = createControlPacket(linear_x, linear_y, angular_z);
 
@@ -192,6 +223,27 @@ void ChassisController::onSerialError(const char* error_msg)
     ROS_WARN("Serial communication error: %s (will keep trying to reconnect)", error_msg);
 }
 
+void ChassisController::onDeviceStateChanged()
+{
+    if (!is_initialized_.load() || shutdown_requested_.load()) return;
+
+    // 设备状态发生变化时，立即发送更新的控制包
+    // 使用当前保存的速度值
+    const auto linear_x = current_linear_x_.load();
+    const auto linear_y = current_linear_y_.load();
+    const auto angular_z = current_angular_z_.load();
+
+    const auto packet = createControlPacket(linear_x, linear_y, angular_z);
+
+    std::lock_guard<std::mutex> lock(cmd_mutex_);
+    if (serial_comm_->sendControlPacket(packet)) {
+        ROS_DEBUG("Device state changed, control packet sent with velocity (%.3f, %.3f, %.3f)",
+                  linear_x, linear_y, angular_z);
+    } else {
+        ROS_DEBUG("Device state changed, but failed to send control packet");
+    }
+}
+
 ControlPacket ChassisController::createControlPacket(double linear_x, double linear_y, double angular_z)
 {
     ControlPacket packet{};
@@ -201,6 +253,19 @@ ControlPacket ChassisController::createControlPacket(double linear_x, double lin
     packet.x_velocity = static_cast<int16_t>(linear_x * CONTROL_VEL_SCALE);
     packet.y_velocity = static_cast<int16_t>(linear_y * CONTROL_VEL_SCALE);
     packet.z_velocity = static_cast<int16_t>(angular_z * CONTROL_VEL_SCALE);
+
+    // 设备控制状态
+    if (device_control_) {
+        packet.light_control = device_control_->getLightSwitch();
+        packet.ultrasonic_switch = device_control_->getUltrasonicSwitch();
+        packet.charge_switch = device_control_->getChargeSwitch();
+        packet.lidar_switch = device_control_->getLidarSwitch();
+    } else {
+        packet.light_control = 0;
+        packet.ultrasonic_switch = 0;
+        packet.charge_switch = 0;
+        packet.lidar_switch = 0;
+    }
 
     // 校验码计算
     const auto* data = reinterpret_cast<const uint8_t*>(&packet);

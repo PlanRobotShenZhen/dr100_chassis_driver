@@ -25,6 +25,12 @@
         <!-- 里程计发布频率参数 -->
         <param name="odom_publish_rate" value="50.0" />
 
+        <!-- 设备控制话题参数 -->
+        <param name="light_topic" value="/light_switch" />
+        <param name="ultrasonic_topic" value="/ultrasonic_switch" />
+        <param name="charge_topic" value="/charge_switch" />
+        <param name="lidar_topic" value="/lidar_switch" />
+
         <!-- 电池监控参数 -->
         <param name="battery_topic" value="/battery_state" />
         <param name="battery_publish_rate" value="10.0" />

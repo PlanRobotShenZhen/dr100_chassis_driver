@@ -29,6 +29,8 @@
 - 发布TF变换（odom -> base_link）
 - 支持速度限制和命令超时保护
 - 自动串口重连功能
+- 设备控制功能（车灯、超声波、充电、雷达开关）
+- 电池状态监控和发布
 
 ## 通讯协议
 
@@ -122,14 +124,25 @@ rosrun tf tf_echo robot_odom robot_base_link
 - `odom_publish_rate`: 里程计发布频率（默认：50.0 Hz，范围：0.1-1000 Hz，≤0时禁用发布）
 - `reconnect_interval`: 重连尝试间隔时间（默认：2.0秒）
 - `max_reconnect_attempts`: 最大重连尝试次数（默认：-1，表示无限重试）
+- `battery_topic`: 电池状态话题名称（默认：/battery_state）
+- `battery_publish_rate`: 电池状态发布频率（默认：10.0 Hz）
+- `light_topic`: 车灯开关话题名称（默认：/light_switch）
+- `ultrasonic_topic`: 超声波开关话题名称（默认：/ultrasonic_switch）
+- `charge_topic`: 充电开关话题名称（默认：/charge_switch）
+- `lidar_topic`: 雷达开关话题名称（默认：/lidar_switch）
 
 ## 话题
 
 ### 订阅的话题
 - 速度命令话题 (geometry_msgs/Twist): 可通过`cmd_vel_topic`参数配置，默认为`/cmd_vel`
+- 车灯开关话题 (std_msgs/Bool): 可通过`light_topic`参数配置，默认为`/light_switch`
+- 超声波开关话题 (std_msgs/Bool): 可通过`ultrasonic_topic`参数配置，默认为`/ultrasonic_switch`
+- 充电开关话题 (std_msgs/Bool): 可通过`charge_topic`参数配置，默认为`/charge_switch`
+- 雷达开关话题 (std_msgs/Bool): 可通过`lidar_topic`参数配置，默认为`/lidar_switch`
 
 ### 发布的话题
 - 里程计话题 (nav_msgs/Odometry): 可通过`odom_topic`参数配置，默认为`/odom`
+- 电池状态话题 (sensor_msgs/BatteryState): 可通过`battery_topic`参数配置，默认为`/battery_state`
 
 ### 发布的TF变换
 - odom -> base_link: 机器人在里程计坐标系中的位置和姿态
@@ -146,6 +159,53 @@ rosrun tf tf_echo robot_odom robot_base_link
 4. **TF发布**: 实时发布odom到base_link的坐标变换
 5. **完整里程计**: 发布包含位置、姿态、速度和协方差的完整里程计信息
 6. **频率控制**: 可配置里程计发布频率，支持禁用里程计发布功能
+
+## 设备控制功能
+
+节点支持通过ROS话题控制各种设备开关，采用新的三态控制协议：
+
+1. **车灯开关**: 通过`/light_switch`话题接收Bool类型的车灯开关命令
+2. **超声波开关**: 通过`/ultrasonic_switch`话题接收Bool类型的超声波开关命令
+3. **充电开关**: 通过`/charge_switch`话题接收Bool类型的充电开关命令
+4. **雷达开关**: 通过`/lidar_switch`话题接收Bool类型的雷达开关命令
+
+### 开关控制协议
+- **0**: 保持当前状态（默认状态，无话题数据时发送）
+- **1**: 开启设备（Bool话题data=true时发送）
+- **2**: 关闭设备（Bool话题data=false时发送）
+
+### 自动状态重置
+- 当开关话题超过2秒没有新数据时，自动重置为保持状态(0)
+- 确保在话题断开或无数据时不会持续发送开启/关闭命令
+
+### 设备控制命令示例
+```bash
+# 开启车灯（发送1给下位机）
+rostopic pub /light_switch std_msgs/Bool "data: true"
+
+# 关闭车灯（发送2给下位机）
+rostopic pub /light_switch std_msgs/Bool "data: false"
+
+# 开启超声波（发送1给下位机）
+rostopic pub /ultrasonic_switch std_msgs/Bool "data: true"
+
+# 关闭超声波（发送2给下位机）
+rostopic pub /ultrasonic_switch std_msgs/Bool "data: false"
+
+# 开启充电（发送1给下位机）
+rostopic pub /charge_switch std_msgs/Bool "data: true"
+
+# 关闭充电（发送2给下位机）
+rostopic pub /charge_switch std_msgs/Bool "data: false"
+
+# 开启雷达（发送1给下位机）
+rostopic pub /lidar_switch std_msgs/Bool "data: true"
+
+# 关闭雷达（发送2给下位机）
+rostopic pub /lidar_switch std_msgs/Bool "data: false"
+
+# 注意：停止发送话题数据2秒后，所有开关自动重置为保持状态(0)
+```
 
 ## 自动重连功能
 

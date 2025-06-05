@@ -142,6 +142,7 @@ add_executable(${PROJECT_NAME}_node
   src/serial_communication.cpp
   src/odometry_publisher.cpp
   src/battery_monitor.cpp
+  src/device_control.cpp
   src/common_types.cpp
 )
 

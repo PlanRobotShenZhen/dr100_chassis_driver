@@ -10,6 +10,7 @@
 #include "dr100_chassis_driver/serial_communication.h"
 #include "dr100_chassis_driver/odometry_publisher.h"
 #include "dr100_chassis_driver/battery_monitor.h"
+#include "dr100_chassis_driver/device_control.h"
 
 class ChassisController
 {
@@ -32,11 +33,13 @@ private:
     std::unique_ptr<dr100_chassis_driver::SerialCommunication> serial_comm_;
     std::unique_ptr<dr100_chassis_driver::OdometryPublisher> odom_publisher_;
     std::unique_ptr<dr100_chassis_driver::BatteryMonitor> battery_monitor_;
+    std::unique_ptr<dr100_chassis_driver::DeviceControl> device_control_;
 
     // 回调函数
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
     void onFeedbackReceived(const dr100_chassis_driver::FeedbackPacket& packet);
     void onSerialError(const char* error_msg);
+    void onDeviceStateChanged();
 
     // 数据处理函数
     dr100_chassis_driver::ControlPacket createControlPacket(double linear_x, double linear_y, double angular_z);
@@ -63,11 +66,20 @@ private:
     double cmd_timeout_;
     std::string battery_topic_;
     double battery_publish_rate_;
+    std::string light_topic_;
+    std::string ultrasonic_topic_;
+    std::string charge_topic_;
+    std::string lidar_topic_;
 
     // 状态变量
     std::atomic<bool> is_initialized_;
     std::atomic<bool> shutdown_requested_;
     ros::Time last_cmd_time_;
+
+    // 当前速度状态（用于设备状态变化时重发）
+    std::atomic<double> current_linear_x_;
+    std::atomic<double> current_linear_y_;
+    std::atomic<double> current_angular_z_;
 
     // 线程同步
     mutable std::mutex cmd_mutex_;

@@ -1,0 +1,92 @@
+#ifndef DEVICE_CONTROL_H
+#define DEVICE_CONTROL_H
+
+#include <ros/ros.h>
+#include <std_msgs/Bool.h>
+#include <mutex>
+#include <atomic>
+#include <functional>
+#include <thread>
+#include <condition_variable>
+
+namespace dr100_chassis_driver {
+
+class DeviceControl
+{
+public:
+    // 设备状态更新回调函数类型
+    using DeviceStateCallback = std::function<void()>;
+
+    DeviceControl();
+    ~DeviceControl();
+
+    // 初始化和控制
+    bool initialize(ros::NodeHandle& nh,
+                   const std::string& light_topic = "/light_switch",
+                   const std::string& ultrasonic_topic = "/ultrasonic_switch",
+                   const std::string& charge_topic = "/charge_switch",
+                   const std::string& lidar_topic = "/lidar_switch");
+    void start();
+    void stop();
+
+    // 获取当前设备状态
+    uint8_t getLightSwitch() const;
+    uint8_t getUltrasonicSwitch() const;
+    uint8_t getChargeSwitch() const;
+    uint8_t getLidarSwitch() const;
+
+    // 设置设备状态更新回调
+    void setDeviceStateCallback(const DeviceStateCallback& callback);
+
+private:
+    // ROS相关
+    ros::NodeHandle* nh_;
+    ros::Subscriber light_sub_;
+    ros::Subscriber ultrasonic_sub_;
+    ros::Subscriber charge_sub_;
+    ros::Subscriber lidar_sub_;
+
+    // 回调函数
+    void lightSwitchCallback(const std_msgs::Bool::ConstPtr& msg);
+    void ultrasonicSwitchCallback(const std_msgs::Bool::ConstPtr& msg);
+    void chargeSwitchCallback(const std_msgs::Bool::ConstPtr& msg);
+    void lidarSwitchCallback(const std_msgs::Bool::ConstPtr& msg);
+
+    // 设备状态变量
+    std::atomic<uint8_t> light_switch_;
+    std::atomic<uint8_t> ultrasonic_switch_;
+    std::atomic<uint8_t> charge_switch_;
+    std::atomic<uint8_t> lidar_switch_;
+
+    // 状态管理
+    std::atomic<bool> is_initialized_;
+    std::atomic<bool> is_running_;
+    std::atomic<bool> shutdown_requested_;
+
+    // 状态重置相关
+    ros::Time last_light_time_;
+    ros::Time last_ultrasonic_time_;
+    ros::Time last_charge_time_;
+    ros::Time last_lidar_time_;
+    double switch_timeout_;  // 开关状态超时时间（秒）
+
+    // 线程管理
+    std::unique_ptr<std::thread> reset_thread_;
+    std::condition_variable reset_cv_;
+    std::mutex reset_mutex_;
+
+    // 回调函数
+    DeviceStateCallback device_state_callback_;
+
+    // 线程同步
+    mutable std::mutex callback_mutex_;
+
+    // 辅助函数
+    void notifyDeviceStateChanged();
+    void resetSwitchThread();
+    void resetSwitchIfTimeout(std::atomic<uint8_t>& switch_state, const ros::Time& last_time, const char* switch_name);
+};
+
+} // namespace dr100_chassis_driver
+
+#endif // DEVICE_CONTROL_H
