@@ -9,6 +9,7 @@
 #include "dr100_chassis_driver/common_types.h"
 #include "dr100_chassis_driver/serial_communication.h"
 #include "dr100_chassis_driver/odometry_publisher.h"
+#include "dr100_chassis_driver/battery_monitor.h"
 
 class ChassisController
 {
@@ -30,6 +31,7 @@ private:
     // 模块组件
     std::unique_ptr<dr100_chassis_driver::SerialCommunication> serial_comm_;
     std::unique_ptr<dr100_chassis_driver::OdometryPublisher> odom_publisher_;
+    std::unique_ptr<dr100_chassis_driver::BatteryMonitor> battery_monitor_;
 
     // 回调函数
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
@@ -59,6 +61,8 @@ private:
     int max_reconnect_attempts_;
     double odom_publish_rate_;
     double cmd_timeout_;
+    std::string battery_topic_;
+    double battery_publish_rate_;
 
     // 状态变量
     std::atomic<bool> is_initialized_;

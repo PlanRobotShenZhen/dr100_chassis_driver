@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   roscpp
   rospy
+  sensor_msgs
   serial
   std_msgs
   tf
@@ -140,6 +141,7 @@ add_executable(${PROJECT_NAME}_node
   src/chassis_controller.cpp
   src/serial_communication.cpp
   src/odometry_publisher.cpp
+  src/battery_monitor.cpp
   src/common_types.cpp
 )
 

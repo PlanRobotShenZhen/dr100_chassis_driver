@@ -25,6 +25,10 @@
         <!-- 里程计发布频率参数 -->
         <param name="odom_publish_rate" value="50.0" />
 
+        <!-- 电池监控参数 -->
+        <param name="battery_topic" value="/battery_state" />
+        <param name="battery_publish_rate" value="10.0" />
+
         <!-- 重连参数 -->
         <param name="reconnect_interval" value="2.0" />
         <param name="max_reconnect_attempts" value="-1" />

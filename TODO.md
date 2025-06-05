@@ -22,7 +22,7 @@ BatteryMonitor模块：
 
     电池信息话题发布
     电池状态监控
-    电池告警处理
+    ...
 
 EmergencyHandler模块：
 

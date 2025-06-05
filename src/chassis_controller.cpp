@@ -24,9 +24,11 @@ ChassisController::ChassisController()
     private_nh_.param("reconnect_interval", reconnect_interval_, 2.0);
     private_nh_.param("max_reconnect_attempts", max_reconnect_attempts_, -1);
     private_nh_.param("odom_publish_rate", odom_publish_rate_, 50.0);
+    private_nh_.param("battery_topic", battery_topic_, std::string("/battery_state"));
+    private_nh_.param("battery_publish_rate", battery_publish_rate_, 10.0);
 
-    ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz",
-             port_name_.c_str(), baudrate_, odom_publish_rate_);
+    ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, battery_rate=%.1fHz",
+             port_name_.c_str(), baudrate_, odom_publish_rate_, battery_publish_rate_);
     ROS_INFO("Note: Program will continue running even if serial port is not available");
 }
 
@@ -41,6 +43,7 @@ bool ChassisController::initialize()
         // 创建模块实例
         serial_comm_ = std::make_unique<SerialCommunication>();
         odom_publisher_ = std::make_unique<OdometryPublisher>();
+        battery_monitor_ = std::make_unique<BatteryMonitor>();
 
         // 初始化串口通信模块（总是成功，即使串口不存在）
         serial_comm_->initialize(port_name_, baudrate_, reconnect_interval_, max_reconnect_attempts_);
@@ -54,6 +57,12 @@ bool ChassisController::initialize()
         // 初始化里程计发布模块
         if (!odom_publisher_->initialize(nh_, odom_topic_, odom_frame_id_, base_frame_id_, odom_publish_rate_)) {
             ROS_ERROR("Failed to initialize odometry publisher");
+            return false;
+        }
+
+        // 初始化电池监控模块
+        if (!battery_monitor_->initialize(nh_, battery_topic_, battery_publish_rate_)) {
+            ROS_ERROR("Failed to initialize battery monitor");
             return false;
         }
 
@@ -86,6 +95,7 @@ void ChassisController::run()
     // 启动模块
     serial_comm_->start();
     odom_publisher_->start();
+    battery_monitor_->start();
 
     ROS_INFO("ChassisController started");
 
@@ -139,6 +149,7 @@ void ChassisController::shutdown()
     // 停止模块
     if (serial_comm_) serial_comm_->stop();
     if (odom_publisher_) odom_publisher_->stop();
+    if (battery_monitor_) battery_monitor_->stop();
 
     if (spinner_) spinner_->stop();
 
@@ -168,6 +179,9 @@ void ChassisController::onFeedbackReceived(const FeedbackPacket& packet)
 
     // 将反馈数据传递给里程计发布模块
     odom_publisher_->processFeedbackPacket(packet);
+
+    // 将反馈数据传递给电池监控模块
+    battery_monitor_->processFeedbackPacket(packet);
 }
 
 void ChassisController::onSerialError(const char* error_msg)
