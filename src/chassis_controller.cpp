@@ -34,11 +34,23 @@ ChassisController::ChassisController()
     private_nh_.param<std::string>("ultrasonic_topic", ultrasonic_topic_, "/ultrasonic_switch");
     private_nh_.param<std::string>("charge_topic", charge_topic_, "/charge_switch");
     private_nh_.param<std::string>("lidar_topic", lidar_topic_, "/lidar_switch");
+    private_nh_.param<std::string>("emergency_topic", emergency_topic_, "/emergency_stop");
+    private_nh_.param<std::string>("motor_enable_topic", motor_enable_topic_, "/motor_enable");
+
+    // 设备启用参数
+    private_nh_.param("enable_light", enable_light_, true);
+    private_nh_.param("enable_ultrasonic", enable_ultrasonic_, true);
+    private_nh_.param("enable_charge", enable_charge_, true);
+    private_nh_.param("enable_lidar", enable_lidar_, true);
+    private_nh_.param("enable_emergency", enable_emergency_, true);
+    private_nh_.param("enable_motor_enable", enable_motor_enable_, true);
 
     ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, battery_rate=%.1fHz",
              port_name_.c_str(), baudrate_, odom_publish_rate_, battery_publish_rate_);
     ROS_INFO("Device control topics: light=%s, ultrasonic=%s, charge=%s, lidar=%s",
              light_topic_.c_str(), ultrasonic_topic_.c_str(), charge_topic_.c_str(), lidar_topic_.c_str());
+    ROS_INFO("Safety control topics: emergency=%s, motor_enable=%s",
+             emergency_topic_.c_str(), motor_enable_topic_.c_str());
     ROS_INFO("Note: Program will continue running even if serial port is not available");
 }
 
@@ -78,7 +90,10 @@ bool ChassisController::initialize()
         }
 
         // 初始化设备控制模块
-        if (!device_control_->initialize(nh_, light_topic_, ultrasonic_topic_, charge_topic_, lidar_topic_)) {
+        if (!device_control_->initialize(nh_, light_topic_, ultrasonic_topic_, charge_topic_, lidar_topic_,
+                                         emergency_topic_, motor_enable_topic_,
+                                         enable_light_, enable_ultrasonic_, enable_charge_, enable_lidar_,
+                                         enable_emergency_, enable_motor_enable_)) {
             ROS_ERROR("Failed to initialize device control");
             return false;
         }
@@ -248,7 +263,15 @@ ControlPacket ChassisController::createControlPacket(double linear_x, double lin
 {
     ControlPacket packet{};
     packet.frame_header = FRAME_HEADER;
-    packet.motor_enable = motor_enable_ ? 1 : 0;
+
+    // 电机使能和急停状态
+    if (device_control_) {
+        packet.motor_enable = device_control_->getMotorEnable();
+        packet.emergency_stop = device_control_->getEmergencyStop();
+    } else {
+        packet.motor_enable = motor_enable_ ? 1 : 0;  // 使用参数默认值
+        packet.emergency_stop = 0;
+    }
 
     packet.x_velocity = static_cast<int16_t>(linear_x * CONTROL_VEL_SCALE);
     packet.y_velocity = static_cast<int16_t>(linear_y * CONTROL_VEL_SCALE);

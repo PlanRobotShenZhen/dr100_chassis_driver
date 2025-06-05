@@ -8,16 +8,14 @@
 - `chassis_controller.cpp` - 主控制器，负责协调各个模块
 - `serial_communication.cpp` - 串口通信模块
 - `odometry_publisher.cpp` - 里程计发布模块
-- `device_control.cpp` - 设备控制模块（车灯、超声波、充电、雷达等）
+- `device_control.cpp` - 设备控制模块（车灯、超声波、充电、雷达、急停、电机使能等）
 - `battery_monitor.cpp` - 电池监控模块
-- `emergency_handler.cpp` - 急停处理模块
 
 2. **对应的头文件**
 - `serial_communication.h`
 - `odometry_publisher.h`
 - `device_control.h`
 - `battery_monitor.h`
-- `emergency_handler.h`
 - `common_types.h` - 共享的数据结构和常量
 
 ## 功能特性
@@ -30,14 +28,18 @@
 - 支持速度限制和命令超时保护
 - 自动串口重连功能
 - 设备控制功能（车灯、超声波、充电、雷达开关）
+- 安全控制功能（急停命令、电机使能开关）
 - 电池状态监控和发布
 
 ## 通讯协议
 
 ### 上位机发送数据格式（17字节）
 - 帧头：0x7B
-- 电机使能、急停、车灯控制等
+- 电机使能：0保持，1开启，2关闭
+- 急停命令：0保持，1急停，2取消急停
+- 车灯控制：0保持，1开启，2关闭
 - X/Y/Z轴速度：放大1000倍后发送
+- 超声波、充电、雷达开关：0保持，1开启，2关闭
 - 校验码：异或运算
 - 帧尾：0x7D
 
@@ -130,6 +132,14 @@ rosrun tf tf_echo robot_odom robot_base_link
 - `ultrasonic_topic`: 超声波开关话题名称（默认：/ultrasonic_switch）
 - `charge_topic`: 充电开关话题名称（默认：/charge_switch）
 - `lidar_topic`: 雷达开关话题名称（默认：/lidar_switch）
+- `emergency_topic`: 急停命令话题名称（默认：/emergency_stop）
+- `motor_enable_topic`: 电机使能话题名称（默认：/motor_enable）
+- `enable_light`: 是否启用车灯控制话题（默认：true）
+- `enable_ultrasonic`: 是否启用超声波控制话题（默认：true）
+- `enable_charge`: 是否启用充电控制话题（默认：true）
+- `enable_lidar`: 是否启用雷达控制话题（默认：true）
+- `enable_emergency`: 是否启用急停控制话题（默认：true）
+- `enable_motor_enable`: 是否启用电机使能控制话题（默认：true）
 
 ## 话题
 
@@ -139,6 +149,8 @@ rosrun tf tf_echo robot_odom robot_base_link
 - 超声波开关话题 (std_msgs/Bool): 可通过`ultrasonic_topic`参数配置，默认为`/ultrasonic_switch`
 - 充电开关话题 (std_msgs/Bool): 可通过`charge_topic`参数配置，默认为`/charge_switch`
 - 雷达开关话题 (std_msgs/Bool): 可通过`lidar_topic`参数配置，默认为`/lidar_switch`
+- 急停命令话题 (std_msgs/Bool): 可通过`emergency_topic`参数配置，默认为`/emergency_stop`
+- 电机使能话题 (std_msgs/Bool): 可通过`motor_enable_topic`参数配置，默认为`/motor_enable`
 
 ### 发布的话题
 - 里程计话题 (nav_msgs/Odometry): 可通过`odom_topic`参数配置，默认为`/odom`
@@ -162,17 +174,30 @@ rosrun tf tf_echo robot_odom robot_base_link
 
 ## 设备控制功能
 
-节点支持通过ROS话题控制各种设备开关，采用新的三态控制协议：
+节点支持通过ROS话题控制各种设备开关和安全功能，采用三态控制协议。可通过参数控制是否启用各个设备控制话题：
 
-1. **车灯开关**: 通过`/light_switch`话题接收Bool类型的车灯开关命令
-2. **超声波开关**: 通过`/ultrasonic_switch`话题接收Bool类型的超声波开关命令
-3. **充电开关**: 通过`/charge_switch`话题接收Bool类型的充电开关命令
-4. **雷达开关**: 通过`/lidar_switch`话题接收Bool类型的雷达开关命令
+1. **车灯开关**: 通过`/light_switch`话题接收Bool类型的车灯开关命令（可通过`enable_light`参数禁用）
+2. **超声波开关**: 通过`/ultrasonic_switch`话题接收Bool类型的超声波开关命令（可通过`enable_ultrasonic`参数禁用）
+3. **充电开关**: 通过`/charge_switch`话题接收Bool类型的充电开关命令（可通过`enable_charge`参数禁用）
+4. **雷达开关**: 通过`/lidar_switch`话题接收Bool类型的雷达开关命令（可通过`enable_lidar`参数禁用）
+5. **急停命令**: 通过`/emergency_stop`话题接收Bool类型的急停命令（可通过`enable_emergency`参数禁用）
+6. **电机使能**: 通过`/motor_enable`话题接收Bool类型的电机使能命令（可通过`enable_motor_enable`参数禁用）
 
-### 开关控制协议
-- **0**: 保持当前状态（默认状态，无话题数据时发送）
-- **1**: 开启设备（Bool话题data=true时发送）
-- **2**: 关闭设备（Bool话题data=false时发送）
+### 控制协议
+- **设备开关协议**（车灯、超声波、充电、雷达）：
+  - **0**: 保持当前状态（默认状态，无话题数据时发送）
+  - **1**: 开启设备（Bool话题data=true时发送）
+  - **2**: 关闭设备（Bool话题data=false时发送）
+
+- **急停命令协议**：
+  - **0**: 保持当前状态
+  - **1**: 急停（Bool话题data=true时发送）
+  - **2**: 取消急停（Bool话题data=false时发送）
+
+- **电机使能协议**：
+  - **0**: 保持当前状态
+  - **1**: 开启电机（Bool话题data=true时发送）
+  - **2**: 关闭电机（Bool话题data=false时发送）
 
 ### 自动状态重置
 - 当开关话题超过2秒没有新数据时，自动重置为保持状态(0)
@@ -204,7 +229,47 @@ rostopic pub /lidar_switch std_msgs/Bool "data: true"
 # 关闭雷达（发送2给下位机）
 rostopic pub /lidar_switch std_msgs/Bool "data: false"
 
+# 急停命令（发送1给下位机）
+rostopic pub /emergency_stop std_msgs/Bool "data: true"
+
+# 取消急停（发送2给下位机）
+rostopic pub /emergency_stop std_msgs/Bool "data: false"
+
+# 开启电机（发送1给下位机）
+rostopic pub /motor_enable std_msgs/Bool "data: true"
+
+# 关闭电机（发送2给下位机）
+rostopic pub /motor_enable std_msgs/Bool "data: false"
+
 # 注意：停止发送话题数据2秒后，所有开关自动重置为保持状态(0)
+```
+
+### 设备控制配置示例
+可以通过launch文件参数选择性启用设备控制功能：
+
+```xml
+<!-- 只启用车灯和急停功能，禁用其他设备控制 -->
+<param name="enable_light" value="true" />
+<param name="enable_ultrasonic" value="false" />
+<param name="enable_charge" value="false" />
+<param name="enable_lidar" value="false" />
+<param name="enable_emergency" value="true" />
+<param name="enable_motor_enable" value="true" />
+```
+
+### 设备控制测试
+详细的测试方法和配置示例请参考：
+- `tools/device_control_test_guide.md` - 完整的测试指南
+- `tools/test_device_switch.py` - 自动化测试脚本
+- `launch/chassis_controller_minimal.launch` - 最小配置示例
+
+```bash
+# 运行设备控制测试
+cd ~/catkin_ws/src/dr100/dr100_chassis_driver
+python3 tools/test_device_switch.py
+
+# 查看测试帮助
+python3 tools/test_device_switch.py help
 ```
 
 ## 自动重连功能

@@ -70,6 +70,16 @@ private:
     std::string ultrasonic_topic_;
     std::string charge_topic_;
     std::string lidar_topic_;
+    std::string emergency_topic_;
+    std::string motor_enable_topic_;
+
+    // 设备启用参数
+    bool enable_light_;
+    bool enable_ultrasonic_;
+    bool enable_charge_;
+    bool enable_lidar_;
+    bool enable_emergency_;
+    bool enable_motor_enable_;
 
     // 状态变量
     std::atomic<bool> is_initialized_;
