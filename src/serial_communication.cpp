@@ -35,14 +35,16 @@ bool SerialCommunication::initialize(const std::string& port_name, int baudrate,
     reconnect_interval_ = reconnect_interval;
     max_reconnect_attempts_ = max_reconnect_attempts;
 
+    // 尝试初始化串口，但不因失败而退出
     if (!initializeSerial()) {
-        ROS_ERROR("Failed to initialize serial port: %s", port_name_.c_str());
-        return false;
+        ROS_WARN("Serial port not available: %s, will continue trying to connect in background",
+                 port_name_.c_str());
+        serial_connected_ = false;
     }
 
     is_initialized_ = true;
-    ROS_INFO("SerialCommunication initialized: port=%s, baudrate=%d", 
-             port_name_.c_str(), baudrate_);
+    ROS_INFO("SerialCommunication initialized: port=%s, baudrate=%d, connected=%s",
+             port_name_.c_str(), baudrate_, serial_connected_.load() ? "yes" : "no");
     return true;
 }
 
@@ -140,13 +142,13 @@ bool SerialCommunication::initializeSerial()
             return false;
         }
 
-        ROS_INFO("Serial port opened successfully: %s", port_name_.c_str());
+        ROS_INFO("Serial port connected: %s", port_name_.c_str());
         serial_connected_ = true;
         reconnect_attempts_ = 0;
         return true;
 
     } catch (const std::exception& e) {
-        ROS_ERROR("Failed to initialize serial port: %s", e.what());
+        // 降低错误日志级别，避免过多输出
         serial_connected_ = false;
         return false;
     }
@@ -156,13 +158,17 @@ bool SerialCommunication::reconnectSerial()
 {
     auto current_attempts = reconnect_attempts_.load();
     if (max_reconnect_attempts_ > 0 && current_attempts >= max_reconnect_attempts_) {
-        ROS_ERROR("Max reconnect attempts (%d) reached", max_reconnect_attempts_);
-        return false;
+        // 达到最大重连次数，但不退出，只是降低日志级别
+        if (current_attempts % 10 == 0) { // 每10次尝试输出一次日志
+            ROS_WARN("Still trying to connect to serial port: %s (attempt %d)",
+                     port_name_.c_str(), current_attempts + 1);
+        }
+    } else {
+        ROS_INFO("Trying to connect to serial port: %s (attempt %d)",
+                 port_name_.c_str(), current_attempts + 1);
     }
 
     reconnect_attempts_++;
-    ROS_WARN("Reconnecting... (attempt %d)", current_attempts + 1);
-
     closeSerial();
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     return initializeSerial();
@@ -268,17 +274,23 @@ void SerialCommunication::reconnectionThread()
     while (ros::ok() && !shutdown_requested_) {
         std::unique_lock<std::mutex> lock(serial_mutex_);
 
-        auto timeout = std::chrono::seconds(static_cast<int>(reconnect_interval_));
-        if (reconnect_cv_.wait_for(lock, timeout, [this] {
-            return shutdown_requested_ || !isConnected();
-        })) {
-            if (shutdown_requested_) break;
-
-            if (!isConnected() && reconnectSerial()) {
-                ROS_INFO("Serial reconnected");
+        // 如果未连接，立即尝试连接
+        if (!isConnected()) {
+            lock.unlock(); // 释放锁进行连接尝试
+            if (reconnectSerial()) {
+                ROS_INFO("Serial connected successfully");
                 reconnect_attempts_ = 0;
             }
+            lock.lock(); // 重新获取锁
         }
+
+        // 等待断开信号或超时
+        auto timeout = std::chrono::seconds(static_cast<int>(reconnect_interval_));
+        reconnect_cv_.wait_for(lock, timeout, [this] {
+            return shutdown_requested_ || !isConnected();
+        });
+
+        if (shutdown_requested_) break;
     }
 
     ROS_INFO("Reconnection thread exiting");

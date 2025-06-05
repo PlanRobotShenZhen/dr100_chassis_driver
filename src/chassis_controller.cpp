@@ -27,6 +27,7 @@ ChassisController::ChassisController()
 
     ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz",
              port_name_.c_str(), baudrate_, odom_publish_rate_);
+    ROS_INFO("Note: Program will continue running even if serial port is not available");
 }
 
 ChassisController::~ChassisController()
@@ -41,11 +42,8 @@ bool ChassisController::initialize()
         serial_comm_ = std::make_unique<SerialCommunication>();
         odom_publisher_ = std::make_unique<OdometryPublisher>();
 
-        // 初始化串口通信模块
-        if (!serial_comm_->initialize(port_name_, baudrate_, reconnect_interval_, max_reconnect_attempts_)) {
-            ROS_ERROR("Failed to initialize serial communication");
-            return false;
-        }
+        // 初始化串口通信模块（总是成功，即使串口不存在）
+        serial_comm_->initialize(port_name_, baudrate_, reconnect_interval_, max_reconnect_attempts_);
 
         // 设置串口回调函数
         serial_comm_->setFeedbackCallback(
@@ -91,15 +89,42 @@ void ChassisController::run()
 
     ROS_INFO("ChassisController started");
 
-    // 主线程：命令超时检查
+    // 主线程：命令超时检查和状态监控
     ros::Rate rate(10);
     static const auto stop_packet = createControlPacket(0.0, 0.0, 0.0);
 
+    // 状态显示计数器
+    int status_counter = 0;
+    bool last_connected_status = false;
+
     while (ros::ok() && !shutdown_requested_.load()) {
         const auto now = ros::Time::now();
+
+        // 命令超时检查
         if ((now - last_cmd_time_).toSec() > cmd_timeout_) {
             serial_comm_->sendControlPacket(stop_packet);
         }
+
+        // 连接状态变化检测
+        bool current_connected = serial_comm_->isConnected();
+        if (current_connected != last_connected_status) {
+            if (current_connected) {
+                ROS_INFO("Serial port connected and ready");
+            } else {
+                ROS_WARN("Serial port disconnected, trying to reconnect...");
+            }
+            last_connected_status = current_connected;
+        }
+
+        // 每30秒显示一次状态（如果未连接）
+        if (++status_counter >= 300) { // 10Hz * 30s = 300
+            status_counter = 0;
+            if (!current_connected) {
+                ROS_INFO("Chassis controller running, waiting for serial connection to %s",
+                         port_name_.c_str());
+            }
+        }
+
         rate.sleep();
     }
 }
@@ -147,7 +172,7 @@ void ChassisController::onFeedbackReceived(const FeedbackPacket& packet)
 
 void ChassisController::onSerialError(const char* error_msg)
 {
-    ROS_ERROR("Serial communication error: %s", error_msg);
+    ROS_WARN("Serial communication error: %s (will keep trying to reconnect)", error_msg);
 }
 
 ControlPacket ChassisController::createControlPacket(double linear_x, double linear_y, double angular_z)
