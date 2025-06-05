@@ -9,6 +9,10 @@
 #include <serial/serial.h>
 #include <vector>
 #include <cstdint>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <condition_variable>
 
 class ChassisController
 {
@@ -18,6 +22,7 @@ public:
     
     bool initialize();
     void run();
+    void shutdown();
 
 private:
     // ROS相关
@@ -26,6 +31,8 @@ private:
     ros::Subscriber cmd_vel_sub_;
     ros::Publisher odom_pub_;
     tf::TransformBroadcaster odom_broadcaster_;
+    ros::Timer odom_timer_;
+    std::unique_ptr<ros::AsyncSpinner> spinner_;
     
     // 串口相关
     serial::Serial serial_port_;
@@ -72,11 +79,14 @@ private:
     
     // 回调函数
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
+    void odomTimerCallback(const ros::TimerEvent& event);
     
     // 串口通讯函数
     bool sendControlPacket(const ControlPacket& packet);
     bool receiveFeedbackPacket(FeedbackPacket& packet);
     void processSerialData();
+    void serialProcessingThread();
+    void reconnectionThread();
 
     // 串口重连函数
     bool initializeSerial();
@@ -88,6 +98,17 @@ private:
     ControlPacket createControlPacket(double linear_x, double linear_y, double angular_z);
     void publishOdometry(const FeedbackPacket& packet);
     void updateOdometry(double vx, double vy, double vth, double dt);
+
+    // 辅助函数：减少重复代码
+    template<typename T>
+    T clampValue(T value, T max_val) const {
+        return std::max(-max_val, std::min(max_val, value));
+    }
+
+    void handleSerialError() {
+        serial_connected_ = false;
+        reconnect_cv_.notify_one();
+    }
     
     // 参数
     double max_linear_velocity_;
@@ -103,22 +124,36 @@ private:
     bool publish_odom_;
 
     // 状态变量
-    bool is_initialized_;
+    std::atomic<bool> is_initialized_;
+    std::atomic<bool> shutdown_requested_;
     ros::Time last_cmd_time_;
     ros::Time last_odom_time_;
-    ros::Time last_odom_publish_time_;
     double cmd_timeout_;
     ros::Time last_reconnect_attempt_;
-    int reconnect_attempts_;
-    bool serial_connected_;
+    std::atomic<int> reconnect_attempts_;
+    std::atomic<bool> serial_connected_;
 
-    // 里程计状态
+    // 线程管理
+    std::thread serial_thread_;
+    std::thread reconnect_thread_;
+
+    // 线程同步
+    mutable std::mutex odom_mutex_;
+    mutable std::mutex serial_mutex_;
+    mutable std::mutex cmd_mutex_;
+    std::condition_variable reconnect_cv_;
+
+    // 里程计状态 (需要线程保护)
     double x_;
     double y_;
     double th_;
     double vx_;
     double vy_;
     double vth_;
+
+    // 最新的反馈数据 (需要线程保护)
+    FeedbackPacket latest_feedback_;
+    bool has_new_feedback_;
 };
 
 

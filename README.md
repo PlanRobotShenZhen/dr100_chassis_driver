@@ -2,6 +2,24 @@
 
 这个包实现了DR100机器人的底盘控制功能，通过串口与下位机通讯来控制机器人运动并获取速度反馈。
 
+## 代码结构
+
+1. **核心模块结构**
+- `chassis_controller.cpp` - 主控制器，负责协调各个模块
+- `serial_communication.cpp` - 串口通信模块
+- `odometry_publisher.cpp` - 里程计发布模块
+- `device_control.cpp` - 设备控制模块（车灯、超声波、充电、雷达等）
+- `battery_monitor.cpp` - 电池监控模块
+- `emergency_handler.cpp` - 急停处理模块
+
+2. **对应的头文件**
+- `serial_communication.h`
+- `odometry_publisher.h`
+- `device_control.h`
+- `battery_monitor.h`
+- `emergency_handler.h`
+- `common_types.h` - 共享的数据结构和常量
+
 ## 功能特性
 
 - 监听 `/cmd_vel` 话题接收速度命令

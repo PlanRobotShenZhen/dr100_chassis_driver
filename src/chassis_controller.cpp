@@ -1,11 +1,14 @@
 #include "dr100_chassis_driver/chassis_controller.h"
-#include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <numeric>
+#include <functional>
+#include <iterator>
 
 ChassisController::ChassisController()
     : private_nh_("~")
     , is_initialized_(false)
+    , shutdown_requested_(false)
     , motor_enable_(true)
     , reconnect_attempts_(0)
     , serial_connected_(false)
@@ -15,80 +18,65 @@ ChassisController::ChassisController()
     , vx_(0.0)
     , vy_(0.0)
     , vth_(0.0)
+    , has_new_feedback_(false)
 {
-    // 获取参数
-    private_nh_.param<std::string>("port", port_name_, "/tmp/ttyV1");
-    private_nh_.param<int>("baudrate", baudrate_, 115200);
-    private_nh_.param<double>("max_linear_velocity", max_linear_velocity_, 2.0);
-    private_nh_.param<double>("max_angular_velocity", max_angular_velocity_, 2.0);
-    private_nh_.param<double>("cmd_timeout", cmd_timeout_, 1.0);
-    private_nh_.param<bool>("motor_enable", motor_enable_, true);
-    private_nh_.param<std::string>("cmd_vel_topic", cmd_vel_topic_, "/cmd_vel");
-    private_nh_.param<std::string>("odom_topic", odom_topic_, "/odom");
-    private_nh_.param<std::string>("odom_frame_id", odom_frame_id_, "odom");
-    private_nh_.param<std::string>("base_frame_id", base_frame_id_, "base_link");
-    private_nh_.param<double>("reconnect_interval", reconnect_interval_, 2.0);
-    private_nh_.param<int>("max_reconnect_attempts", max_reconnect_attempts_, -1); // -1表示无限重试
-    private_nh_.param<double>("odom_publish_rate", odom_publish_rate_, 50.0); // 默认50Hz
+    // 获取参数（使用结构化初始化简化）
+    private_nh_.param("port", port_name_, std::string("/tmp/ttyV1"));
+    private_nh_.param("baudrate", baudrate_, 115200);
+    private_nh_.param("max_linear_velocity", max_linear_velocity_, 2.0);
+    private_nh_.param("max_angular_velocity", max_angular_velocity_, 2.0);
+    private_nh_.param("cmd_timeout", cmd_timeout_, 1.0);
+    private_nh_.param("motor_enable", motor_enable_, true);
+    private_nh_.param("cmd_vel_topic", cmd_vel_topic_, std::string("/cmd_vel"));
+    private_nh_.param("odom_topic", odom_topic_, std::string("/odom"));
+    private_nh_.param("odom_frame_id", odom_frame_id_, std::string("odom"));
+    private_nh_.param("base_frame_id", base_frame_id_, std::string("base_link"));
+    private_nh_.param("reconnect_interval", reconnect_interval_, 2.0);
+    private_nh_.param("max_reconnect_attempts", max_reconnect_attempts_, -1);
+    private_nh_.param("odom_publish_rate", odom_publish_rate_, 50.0);
 
-    // 检查里程计发布频率范围并设置发布标志
-    if (odom_publish_rate_ <= 0.0) {
-        publish_odom_ = false;
-        ROS_WARN("Odometry publish rate <= 0, odometry publishing disabled");
-    } else {
-        publish_odom_ = true;
-        // 限制频率范围：0.1Hz到1000Hz
-        if (odom_publish_rate_ < 0.1) {
-            odom_publish_rate_ = 0.1;
-            ROS_WARN("Odometry publish rate too low, set to 0.1 Hz");
-        } else if (odom_publish_rate_ > 1000.0) {
-            odom_publish_rate_ = 1000.0;
-            ROS_WARN("Odometry publish rate too high, set to 1000 Hz");
-        }
-    }
-    
-    ROS_INFO("ChassisController initialized with port: %s, baudrate: %d",
-             port_name_.c_str(), baudrate_);
-    ROS_INFO("Topics: cmd_vel=%s, odom=%s", cmd_vel_topic_.c_str(), odom_topic_.c_str());
-    ROS_INFO("Frames: odom_frame=%s, base_frame=%s", odom_frame_id_.c_str(), base_frame_id_.c_str());
+    // 简化里程计发布设置
+    publish_odom_ = odom_publish_rate_ > 0.0;
     if (publish_odom_) {
-        ROS_INFO("Odometry publish rate: %.1f Hz", odom_publish_rate_);
-    } else {
-        ROS_INFO("Odometry publishing disabled");
+        odom_publish_rate_ = std::max(0.1, std::min(1000.0, odom_publish_rate_));
     }
+
+    // 简化日志输出
+    ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz",
+             port_name_.c_str(), baudrate_, publish_odom_ ? odom_publish_rate_ : 0.0);
 }
 
 ChassisController::~ChassisController()
 {
-    if (serial_port_.isOpen()) {
-        serial_port_.close();
-    }
+    shutdown();
 }
 
 bool ChassisController::initialize()
 {
     try {
-        // 初始化串口
-        if (!initializeSerial()) {
-            ROS_ERROR("Failed to initialize serial port");
-            return false;
-        }
+        if (!initializeSerial()) return false;
 
-        // 初始化ROS话题
+        // 初始化ROS组件
         cmd_vel_sub_ = nh_.subscribe(cmd_vel_topic_, 1, &ChassisController::cmdVelCallback, this);
         odom_pub_ = nh_.advertise<nav_msgs::Odometry>(odom_topic_, 1);
 
-        is_initialized_ = true;
-        last_cmd_time_ = ros::Time::now();
-        last_odom_time_ = ros::Time::now();
-        last_odom_publish_time_ = ros::Time::now();
-        last_reconnect_attempt_ = ros::Time::now();
+        if (publish_odom_) {
+            odom_timer_ = nh_.createTimer(ros::Duration(1.0 / odom_publish_rate_),
+                                        &ChassisController::odomTimerCallback, this);
+        }
 
+        spinner_ = std::make_unique<ros::AsyncSpinner>(2); // 减少线程数
+
+        // 初始化时间戳
+        auto now = ros::Time::now();
+        last_cmd_time_ = last_odom_time_ = last_reconnect_attempt_ = now;
+
+        is_initialized_ = true;
         ROS_INFO("ChassisController initialized successfully");
         return true;
 
     } catch (const std::exception& e) {
-        ROS_ERROR("Failed to initialize ChassisController: %s", e.what());
+        ROS_ERROR("Initialize failed: %s", e.what());
         return false;
     }
 }
@@ -100,126 +88,161 @@ void ChassisController::run()
         return;
     }
 
-    ros::Rate rate(50); // 50Hz
+    spinner_->start();
 
-    while (ros::ok()) {
-        // 检查串口连接状态
-        if (!isSerialConnected()) {
-            // 尝试重连
-            if ((ros::Time::now() - last_reconnect_attempt_).toSec() >= reconnect_interval_) {
-                if (reconnectSerial()) {
-                    ROS_INFO("Serial port reconnected successfully");
-                    reconnect_attempts_ = 0;
-                } else {
-                    last_reconnect_attempt_ = ros::Time::now();
-                }
-            }
-        } else {
-            // 处理串口数据
-            processSerialData();
+    // 启动工作线程
+    serial_thread_ = std::thread([this] { serialProcessingThread(); });
+    reconnect_thread_ = std::thread([this] { reconnectionThread(); });
 
-            // 检查命令超时
-            if ((ros::Time::now() - last_cmd_time_).toSec() > cmd_timeout_) {
-                // 发送停止命令
-                ControlPacket stop_packet = createControlPacket(0.0, 0.0, 0.0);
-                sendControlPacket(stop_packet);
-            }
+    ROS_INFO("ChassisController started");
+
+    // 主线程：命令超时检查
+    ros::Rate rate(10);
+    while (ros::ok() && !shutdown_requested_) {
+        // 缓存时间计算避免重复调用
+        auto now = ros::Time::now();
+        if ((now - last_cmd_time_).toSec() > cmd_timeout_) {
+            static auto stop_packet = createControlPacket(0.0, 0.0, 0.0); // 缓存停止包
+            sendControlPacket(stop_packet);
         }
-
-        ros::spinOnce();
         rate.sleep();
     }
 }
 
+void ChassisController::shutdown()
+{
+    if (shutdown_requested_) return; // 避免重复关闭
+
+    ROS_INFO("Shutting down ChassisController...");
+    shutdown_requested_ = true;
+    reconnect_cv_.notify_all();
+
+    // 等待线程结束
+    for (auto& thread : {std::ref(serial_thread_), std::ref(reconnect_thread_)}) {
+        if (thread.get().joinable()) thread.get().join();
+    }
+
+    if (spinner_) spinner_->stop();
+
+    // 关闭串口
+    try {
+        if (serial_port_.isOpen()) serial_port_.close();
+    } catch (const std::exception& e) {
+        ROS_WARN("Error closing serial: %s", e.what());
+    }
+
+    ROS_INFO("Shutdown complete");
+}
+
 void ChassisController::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
 {
-    if (!is_initialized_) {
-        return;
-    }
-    
-    // 限制速度范围
-    double linear_x = std::max(-max_linear_velocity_, 
-                              std::min(max_linear_velocity_, msg->linear.x));
-    double linear_y = std::max(-max_linear_velocity_, 
-                              std::min(max_linear_velocity_, msg->linear.y));
-    double angular_z = std::max(-max_angular_velocity_, 
-                               std::min(max_angular_velocity_, msg->angular.z));
-    
-    // 创建控制数据包
-    ControlPacket packet = createControlPacket(linear_x, linear_y, angular_z);
-    
-    // 发送数据包
+    if (!is_initialized_ || shutdown_requested_) return;
+
+    // 使用模板函数简化速度限制
+    auto linear_x = clampValue(msg->linear.x, max_linear_velocity_);
+    auto linear_y = clampValue(msg->linear.y, max_linear_velocity_);
+    auto angular_z = clampValue(msg->angular.z, max_angular_velocity_);
+
+    auto packet = createControlPacket(linear_x, linear_y, angular_z);
+
+    std::lock_guard<std::mutex> lock(cmd_mutex_);
     if (sendControlPacket(packet)) {
         last_cmd_time_ = ros::Time::now();
-        ROS_DEBUG("Sent velocity command: linear_x=%.3f, linear_y=%.3f, angular_z=%.3f", 
-                 linear_x, linear_y, angular_z);
-    } else {
-        ROS_WARN("Failed to send velocity command");
+        ROS_DEBUG("Sent cmd: [%.2f, %.2f, %.2f]", linear_x, linear_y, angular_z);
     }
+}
+
+void ChassisController::odomTimerCallback(const ros::TimerEvent& event)
+{
+    if (!is_initialized_ || shutdown_requested_ || !publish_odom_) return;
+
+    std::lock_guard<std::mutex> lock(odom_mutex_);
+    if (has_new_feedback_) {
+        publishOdometry(latest_feedback_);
+        has_new_feedback_ = false;
+    }
+}
+
+void ChassisController::serialProcessingThread()
+{
+    ROS_INFO("Serial thread started");
+    ros::Rate rate(100);
+
+    while (ros::ok() && !shutdown_requested_) {
+        if (isSerialConnected()) processSerialData();
+        rate.sleep();
+    }
+
+    ROS_INFO("Serial thread exiting");
+}
+
+void ChassisController::reconnectionThread()
+{
+    ROS_INFO("Reconnect thread started");
+
+    while (ros::ok() && !shutdown_requested_) {
+        std::unique_lock<std::mutex> lock(serial_mutex_);
+
+        auto timeout = std::chrono::seconds(static_cast<int>(reconnect_interval_));
+        if (reconnect_cv_.wait_for(lock, timeout, [this] {
+            return shutdown_requested_ || !isSerialConnected();
+        })) {
+            if (shutdown_requested_) break;
+
+            if (!isSerialConnected() && reconnectSerial()) {
+                ROS_INFO("Serial reconnected");
+                reconnect_attempts_ = 0;
+            }
+        }
+    }
+
+    ROS_INFO("Reconnect thread exiting");
 }
 
 ChassisController::ControlPacket ChassisController::createControlPacket(
     double linear_x, double linear_y, double angular_z)
 {
-    ControlPacket packet;
-    memset(&packet, 0, sizeof(packet));
-    
-    packet.frame_header = 0x7B;
+    // 使用常量避免重复计算
+    constexpr double VEL_SCALE = 1000.0;
+    constexpr uint8_t FRAME_HEADER = 0x7B;
+    constexpr uint8_t FRAME_TAIL = 0x7D;
+    constexpr size_t CHECKSUM_LENGTH = 15;
+
+    ControlPacket packet{};
+    packet.frame_header = FRAME_HEADER;
     packet.motor_enable = motor_enable_ ? 1 : 0;
-    packet.emergency_stop = 0;  // 0表示松开
-    packet.light_control = 0;   // 0表示灭
-    
-    // 速度转换：放大1000倍
-    packet.x_velocity = static_cast<int16_t>(linear_x * 1000);
-    packet.y_velocity = static_cast<int16_t>(linear_y * 1000);
-    packet.z_velocity = static_cast<int16_t>(angular_z * 1000);
-    
-    packet.ultrasonic_switch = 0;
-    packet.charge_switch = 0;
-    packet.lidar_switch = 0;
-    packet.reserved1 = 0;
-    packet.reserved2 = 0;
-    
-    // 计算校验码（对前15个字节进行异或运算）
-    packet.checksum = calculateChecksum(reinterpret_cast<const uint8_t*>(&packet), 15);
-    packet.frame_tail = 0x7D;
-    
+    packet.x_velocity = static_cast<int16_t>(linear_x * VEL_SCALE);
+    packet.y_velocity = static_cast<int16_t>(linear_y * VEL_SCALE);
+    packet.z_velocity = static_cast<int16_t>(angular_z * VEL_SCALE);
+    packet.checksum = calculateChecksum(reinterpret_cast<const uint8_t*>(&packet), CHECKSUM_LENGTH);
+    packet.frame_tail = FRAME_TAIL;
+
     return packet;
 }
 
 uint8_t ChassisController::calculateChecksum(const uint8_t* data, size_t length)
 {
-    uint8_t checksum = 0;
-    for (size_t i = 0; i < length; ++i) {
-        checksum ^= data[i];
-    }
-    return checksum;
+    return std::accumulate(data, data + length, uint8_t{0}, std::bit_xor<uint8_t>());
 }
 
 bool ChassisController::sendControlPacket(const ControlPacket& packet)
 {
     try {
-        if (!isSerialConnected()) {
-            ROS_DEBUG("Serial port is not connected, cannot send packet");
-            return false;
-        }
+        std::lock_guard<std::mutex> lock(serial_mutex_);
 
-        size_t bytes_written = serial_port_.write(reinterpret_cast<const uint8_t*>(&packet),
-                                                 sizeof(packet));
+        if (!isSerialConnected()) return false;
+
+        auto bytes_written = serial_port_.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
 
         if (bytes_written != sizeof(packet)) {
-            ROS_WARN("Incomplete packet sent: %zu/%zu bytes", bytes_written, sizeof(packet));
-            // 标记串口为断开状态
-            serial_connected_ = false;
+            handleSerialError();
             return false;
         }
-
         return true;
 
     } catch (const std::exception& e) {
-        ROS_ERROR("Failed to send control packet: %s", e.what());
-        // 标记串口为断开状态
-        serial_connected_ = false;
+        ROS_ERROR("Send packet failed: %s", e.what());
+        handleSerialError();
         return false;
     }
 }
@@ -227,83 +250,69 @@ bool ChassisController::sendControlPacket(const ControlPacket& packet)
 void ChassisController::processSerialData()
 {
     try {
-        if (!isSerialConnected()) {
-            return;
-        }
+        std::lock_guard<std::mutex> lock(serial_mutex_);
 
-        // 检查是否有足够的数据
-        size_t available = serial_port_.available();
-        if (available < sizeof(FeedbackPacket)) {
-            return;
-        }
+        if (!isSerialConnected() || serial_port_.available() < sizeof(FeedbackPacket)) return;
 
         FeedbackPacket packet;
         if (receiveFeedbackPacket(packet)) {
-            publishOdometry(packet);
+            {
+                std::lock_guard<std::mutex> odom_lock(odom_mutex_);
+                latest_feedback_ = packet;
+                has_new_feedback_ = true;
+            }
+
+            if (!publish_odom_) publishOdometry(packet);
         }
 
     } catch (const std::exception& e) {
-        ROS_ERROR("Error processing serial data: %s", e.what());
-        // 标记串口为断开状态
-        serial_connected_ = false;
+        ROS_ERROR("Process serial failed: %s", e.what());
+        handleSerialError();
     }
 }
 
 bool ChassisController::receiveFeedbackPacket(FeedbackPacket& packet)
 {
     try {
+        // 使用常量避免重复计算
+        constexpr uint8_t FRAME_HEADER = 0x7B;
+        constexpr uint8_t FRAME_TAIL = 0x7D;
+        constexpr size_t REMAINING_BYTES = sizeof(FeedbackPacket) - 1;
+        constexpr size_t CHECKSUM_LENGTH = sizeof(FeedbackPacket) - 2;
+
         // 寻找帧头
         uint8_t byte;
-        bool found_header = false;
-
-        while (serial_port_.available() > 0 && !found_header) {
+        while (serial_port_.available() > 0) {
             serial_port_.read(&byte, 1);
-            if (byte == 0x7B) {
-                found_header = true;
+            if (byte == FRAME_HEADER) {
                 packet.frame_header = byte;
+                break;
             }
         }
 
-        if (!found_header) {
+        if (byte != FRAME_HEADER || serial_port_.available() < REMAINING_BYTES) {
             return false;
         }
 
         // 读取剩余数据
-        size_t remaining_bytes = sizeof(FeedbackPacket) - 1;
-        if (serial_port_.available() < remaining_bytes) {
-            return false;
+        auto packet_ptr = reinterpret_cast<uint8_t*>(&packet) + 1;
+        auto bytes_read = serial_port_.read(packet_ptr, REMAINING_BYTES);
+
+        // 批量验证
+        bool valid_packet = (bytes_read == REMAINING_BYTES) &&
+                           (packet.frame_tail == FRAME_TAIL) &&
+                           (packet.checksum == calculateChecksum(
+                               reinterpret_cast<const uint8_t*>(&packet), CHECKSUM_LENGTH));
+
+        if (!valid_packet) {
+            ROS_WARN("Invalid packet: bytes=%zu, tail=0x%02X, checksum=0x%02X",
+                     bytes_read, packet.frame_tail, packet.checksum);
         }
 
-        uint8_t* packet_ptr = reinterpret_cast<uint8_t*>(&packet) + 1;
-        size_t bytes_read = serial_port_.read(packet_ptr, remaining_bytes);
-
-        if (bytes_read != remaining_bytes) {
-            ROS_WARN("Incomplete feedback packet received: %zu/%zu bytes",
-                     bytes_read, remaining_bytes);
-            return false;
-        }
-
-        // 验证帧尾
-        if (packet.frame_tail != 0x7D) {
-            ROS_WARN("Invalid frame tail: 0x%02X", packet.frame_tail);
-            return false;
-        }
-
-        // 验证校验码
-        uint8_t calculated_checksum = calculateChecksum(
-            reinterpret_cast<const uint8_t*>(&packet), sizeof(FeedbackPacket) - 2);
-
-        if (packet.checksum != calculated_checksum) {
-            ROS_WARN("Checksum mismatch: received=0x%02X, calculated=0x%02X",
-                     packet.checksum, calculated_checksum);
-            return false;
-        }
-
-        return true;
+        return valid_packet;
 
     } catch (const std::exception& e) {
-        ROS_ERROR("Failed to receive feedback packet: %s", e.what());
-        // 标记串口为断开状态
+        ROS_ERROR("Receive packet failed: %s", e.what());
         serial_connected_ = false;
         return false;
     }
@@ -311,58 +320,48 @@ bool ChassisController::receiveFeedbackPacket(FeedbackPacket& packet)
 
 void ChassisController::publishOdometry(const FeedbackPacket& packet)
 {
-    ros::Time current_time = ros::Time::now();
-
-    // 从反馈包中提取速度信息（缩小100倍）
-    double vx = static_cast<double>(packet.x_velocity) / 100.0;
-    double vy = static_cast<double>(packet.y_velocity) / 100.0;
-    double vth = static_cast<double>(packet.z_velocity) / 100.0;
-
-    // 计算时间差
-    double dt = (current_time - last_odom_time_).toSec();
+    // 避免重复的时间计算
+    auto current_time = ros::Time::now();
+    auto dt = (current_time - last_odom_time_).toSec();
     last_odom_time_ = current_time;
 
-    // 更新里程计
+    // 使用常量避免重复计算
+    constexpr double VEL_SCALE = 1.0 / 100.0;
+
+    // 批量转换速度数据
+    auto vx = static_cast<double>(packet.x_velocity) * VEL_SCALE;
+    auto vy = static_cast<double>(packet.y_velocity) * VEL_SCALE;
+    auto vth = static_cast<double>(packet.z_velocity) * VEL_SCALE;
+
     updateOdometry(vx, vy, vth, dt);
 
-    // 检查是否需要发布里程计
-    if (!publish_odom_) {
-        return; // 不发布里程计
-    }
+    // 避免重复计算四元数和头部信息
+    auto odom_quat = tf::createQuaternionMsgFromYaw(th_);
 
-    // 检查发布频率
-    double time_since_last_publish = (current_time - last_odom_publish_time_).toSec();
-    double publish_interval = 1.0 / odom_publish_rate_;
-
-    if (time_since_last_publish < publish_interval) {
-        return; // 还没到发布时间
-    }
-
-    last_odom_publish_time_ = current_time;
-
-    // 创建四元数
-    geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(th_);
+    // 创建通用头部
+    auto createHeader = [&](const std::string& frame_id, const std::string& child_frame = "") {
+        std_msgs::Header header;
+        header.stamp = current_time;
+        header.frame_id = frame_id;
+        return header;
+    };
 
     // 发布TF变换
     geometry_msgs::TransformStamped odom_trans;
-    odom_trans.header.stamp = current_time;
-    odom_trans.header.frame_id = odom_frame_id_;
+    odom_trans.header = createHeader(odom_frame_id_);
     odom_trans.child_frame_id = base_frame_id_;
-
     odom_trans.transform.translation.x = x_;
     odom_trans.transform.translation.y = y_;
     odom_trans.transform.translation.z = 0.0;
     odom_trans.transform.rotation = odom_quat;
-
     odom_broadcaster_.sendTransform(odom_trans);
 
     // 发布里程计消息
     nav_msgs::Odometry odom;
-    odom.header.stamp = current_time;
-    odom.header.frame_id = odom_frame_id_;
+    odom.header = createHeader(odom_frame_id_);
     odom.child_frame_id = base_frame_id_;
 
-    // 位置
+    // 位置和方向
     odom.pose.pose.position.x = x_;
     odom.pose.pose.position.y = y_;
     odom.pose.pose.position.z = 0.0;
@@ -373,20 +372,13 @@ void ChassisController::publishOdometry(const FeedbackPacket& packet)
     odom.twist.twist.linear.y = vy_;
     odom.twist.twist.angular.z = vth_;
 
-    // 设置协方差矩阵
-    if (vx_ == 0 && vth_ == 0) {
-        // 静止时使用更高精度的协方差矩阵
-        for (int i = 0; i < 36; i++) {
-            odom.pose.covariance[i] = odom_pose_covariance2[i];
-            odom.twist.covariance[i] = odom_twist_covariance2[i];
-        }
-    } else {
-        // 运动时使用标准协方差矩阵
-        for (int i = 0; i < 36; i++) {
-            odom.pose.covariance[i] = odom_pose_covariance[i];
-            odom.twist.covariance[i] = odom_twist_covariance[i];
-        }
-    }
+    // 简化协方差矩阵设置：避免重复循环
+    bool is_stationary = (vx_ == 0 && vth_ == 0);
+    auto& pose_cov = is_stationary ? odom_pose_covariance2 : odom_pose_covariance;
+    auto& twist_cov = is_stationary ? odom_twist_covariance2 : odom_twist_covariance;
+
+    std::copy(pose_cov, pose_cov + 36, odom.pose.covariance.begin());
+    std::copy(twist_cov, twist_cov + 36, odom.twist.covariance.begin());
 
     odom_pub_.publish(odom);
 
@@ -396,24 +388,23 @@ void ChassisController::publishOdometry(const FeedbackPacket& packet)
 
 void ChassisController::updateOdometry(double vx, double vy, double vth, double dt)
 {
-    // 更新速度
-    vx_ = vx;
-    vy_ = vy;
-    vth_ = vth;
+    // 批量更新速度
+    vx_ = vx; vy_ = vy; vth_ = vth;
+
+    // 缓存三角函数计算避免重复
+    auto cos_th = cos(th_);
+    auto sin_th = sin(th_);
 
     // 计算位置增量
-    double delta_x = (vx * cos(th_) - vy * sin(th_)) * dt;
-    double delta_y = (vx * sin(th_) + vy * cos(th_)) * dt;
-    double delta_th = vth * dt;
+    auto delta_x = (vx * cos_th - vy * sin_th) * dt;
+    auto delta_y = (vx * sin_th + vy * cos_th) * dt;
+    auto delta_th = vth * dt;
 
-    // 更新位置
-    x_ += delta_x;
-    y_ += delta_y;
-    th_ += delta_th;
+    // 批量更新位置
+    x_ += delta_x; y_ += delta_y; th_ += delta_th;
 
-    // 角度归一化到[-π, π]
-    while (th_ > M_PI) th_ -= 2.0 * M_PI;
-    while (th_ < -M_PI) th_ += 2.0 * M_PI;
+    // 使用fmod优化角度归一化
+    th_ = fmod(th_ + M_PI, 2.0 * M_PI) - M_PI;
 }
 
 bool ChassisController::initializeSerial()
@@ -450,45 +441,30 @@ bool ChassisController::initializeSerial()
 
 bool ChassisController::reconnectSerial()
 {
-    // 检查是否达到最大重试次数
-    if (max_reconnect_attempts_ > 0 && reconnect_attempts_ >= max_reconnect_attempts_) {
-        ROS_ERROR("Maximum reconnection attempts (%d) reached, giving up", max_reconnect_attempts_);
+    auto current_attempts = reconnect_attempts_.load();
+    if (max_reconnect_attempts_ > 0 && current_attempts >= max_reconnect_attempts_) {
+        ROS_ERROR("Max reconnect attempts (%d) reached", max_reconnect_attempts_);
         return false;
     }
 
     reconnect_attempts_++;
-    ROS_WARN("Attempting to reconnect serial port (attempt %d/%d)...",
-             reconnect_attempts_, max_reconnect_attempts_ > 0 ? max_reconnect_attempts_ : -1);
+    ROS_WARN("Reconnecting... (attempt %d)", current_attempts + 1);
 
-    // 关闭现有连接
     try {
-        if (serial_port_.isOpen()) {
-            serial_port_.close();
-        }
+        if (serial_port_.isOpen()) serial_port_.close();
     } catch (const std::exception& e) {
-        ROS_WARN("Error closing serial port: %s", e.what());
+        ROS_WARN("Close error: %s", e.what());
     }
 
-    // 短暂延迟
-    ros::Duration(0.5).sleep();
-
-    // 尝试重新初始化
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
     return initializeSerial();
 }
 
 bool ChassisController::isSerialConnected()
 {
     try {
-        // 检查串口是否打开且连接状态正常
-        if (!serial_port_.isOpen() || !serial_connected_) {
-            return false;
-        }
-
-        // 可以添加额外的连接检查逻辑
-        return true;
-
-    } catch (const std::exception& e) {
-        ROS_DEBUG("Serial connection check failed: %s", e.what());
+        return serial_port_.isOpen() && serial_connected_.load();
+    } catch (const std::exception&) {
         serial_connected_ = false;
         return false;
     }
@@ -499,14 +475,11 @@ int main(int argc, char** argv)
     ros::init(argc, argv, "chassis_controller");
 
     ChassisController controller;
-
     if (!controller.initialize()) {
-        ROS_ERROR("Failed to initialize chassis controller");
+        ROS_ERROR("Initialize failed");
         return -1;
     }
 
-    ROS_INFO("Chassis controller started");
     controller.run();
-
     return 0;
 }
