@@ -128,7 +128,7 @@ void OdometryPublisher::updateOdometry(double vx, double vy, double vth, double 
     y_ += delta_y;
     th_ += delta_th;
 
-    // 优化角度归一化（避免不必要的计算）
+    // 角度归一化
     if (th_ > M_PI) {
         th_ -= 2.0 * M_PI;
     } else if (th_ < -M_PI) {
@@ -183,7 +183,7 @@ void OdometryPublisher::publishOdometry()
     odom.twist.twist.linear.y = vy_;
     odom.twist.twist.angular.z = vth_;
 
-    // 优化协方差矩阵设置
+    // 协方差矩阵设置
     const bool is_stationary = (vx_ == 0.0 && vth_ == 0.0);
     const auto* pose_cov = is_stationary ? odom_pose_covariance2 : odom_pose_covariance;
     const auto* twist_cov = is_stationary ? odom_twist_covariance2 : odom_twist_covariance;

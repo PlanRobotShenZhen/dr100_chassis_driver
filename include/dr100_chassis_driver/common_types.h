@@ -11,8 +11,26 @@ constexpr uint8_t FRAME_HEADER = 0x7B;
 constexpr uint8_t FRAME_TAIL = 0x7D;
 constexpr double CONTROL_VEL_SCALE = 1000.0;  // 控制包速度放大倍数
 constexpr double FEEDBACK_VEL_SCALE = 100.0;  // 反馈包速度放大倍数
+constexpr double INV_CONTROL_VEL_SCALE = 1.0 / CONTROL_VEL_SCALE;  // 控制包速度逆向缩放
+constexpr double INV_FEEDBACK_VEL_SCALE = 1.0 / FEEDBACK_VEL_SCALE;  // 反馈包速度逆向缩放
 constexpr size_t CONTROL_CHECKSUM_LENGTH = 15;
 constexpr size_t FEEDBACK_CHECKSUM_LENGTH = 48;
+
+// 电池监控常量
+constexpr float BATTERY_VOLTAGE_SCALE = 100.0f;
+constexpr float BATTERY_CURRENT_SCALE = 100.0f;
+constexpr float BATTERY_PERCENTAGE_SCALE = 100.0f;
+constexpr float INV_BATTERY_VOLTAGE_SCALE = 1.0f / BATTERY_VOLTAGE_SCALE;
+constexpr float INV_BATTERY_CURRENT_SCALE = 1.0f / BATTERY_CURRENT_SCALE;
+constexpr float INV_BATTERY_PERCENTAGE_SCALE = 1.0f / BATTERY_PERCENTAGE_SCALE;
+
+// 电池阈值常量
+constexpr float BATTERY_CURRENT_THRESHOLD = 0.1f;
+constexpr float BATTERY_FULL_THRESHOLD = 0.95f;
+constexpr float BATTERY_MIN_VOLTAGE = 10.0f;
+constexpr float BATTERY_MAX_VOLTAGE = 30.0f;
+constexpr float BATTERY_MAX_TEMP = 60.0f;
+constexpr float BATTERY_MIN_TEMP = -10.0f;
 
 // 数据包大小常量
 constexpr size_t CONTROL_PACKET_SIZE = 17;

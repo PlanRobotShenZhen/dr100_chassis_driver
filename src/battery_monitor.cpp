@@ -45,13 +45,17 @@ bool BatteryMonitor::initialize(ros::NodeHandle& nh, const std::string& battery_
     }
 
     // 初始化电池状态消息
-    battery_msg_.header.frame_id = "base_link";
+    static constexpr char FRAME_ID[] = "base_link";
+    static constexpr char LOCATION[] = "chassis";
+    static constexpr char SERIAL_NUMBER[] = "DR100_BATTERY_001";
+
+    battery_msg_.header.frame_id = FRAME_ID;
     battery_msg_.power_supply_status = sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_UNKNOWN;
     battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_UNKNOWN;
     battery_msg_.power_supply_technology = sensor_msgs::BatteryState::POWER_SUPPLY_TECHNOLOGY_LION;
     battery_msg_.present = true;
-    battery_msg_.location = "chassis";
-    battery_msg_.serial_number = "DR100_BATTERY_001";
+    battery_msg_.location = LOCATION;
+    battery_msg_.serial_number = SERIAL_NUMBER;
 
     // 设置未知值为NaN
     battery_msg_.charge = std::numeric_limits<float>::quiet_NaN();
@@ -95,7 +99,7 @@ void BatteryMonitor::stop()
 
 void BatteryMonitor::processFeedbackPacket(const FeedbackPacket& packet)
 {
-    if (!is_initialized_ || !is_running_) return;
+    if (!is_initialized_.load() || !is_running_.load()) return;
 
     std::lock_guard<std::mutex> lock(battery_mutex_);
     latest_feedback_ = packet;
@@ -109,7 +113,7 @@ void BatteryMonitor::processFeedbackPacket(const FeedbackPacket& packet)
 
 void BatteryMonitor::batteryTimerCallback(const ros::TimerEvent& event)
 {
-    if (!is_initialized_ || !is_running_ || !publish_enabled_) return;
+    if (!is_initialized_.load() || !is_running_.load() || !publish_enabled_) return;
 
     std::lock_guard<std::mutex> lock(battery_mutex_);
     if (has_new_feedback_) {
@@ -131,62 +135,38 @@ void BatteryMonitor::updateBatteryMessage(const FeedbackPacket& packet)
     battery_msg_.voltage = convertVoltage(packet.battery_voltage);
     battery_msg_.current = convertCurrent(packet.battery_current);
     battery_msg_.percentage = convertPercentage(packet.battery_level);
-    
-    // 温度转换（如果有温度传感器数据）
-    // 注意：根据FeedbackPacket结构，battery_temp是int8_t类型
-    // 这里假设温度以摄氏度为单位直接存储
-    float temp_celsius = static_cast<float>(packet.battery_temp);
-    
+
+    // 温度转换
+    const float temp_celsius = convertTemperature(packet.battery_temp);
+
     // 根据电流方向判断充电状态
-    if (std::abs(battery_msg_.current) < 0.1f) {
+    const float abs_current = std::abs(battery_msg_.current);
+    if (abs_current < BATTERY_CURRENT_THRESHOLD) {
         battery_msg_.power_supply_status = sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_NOT_CHARGING;
-    } else if (battery_msg_.current > 0.1f) {
+    } else if (battery_msg_.current > BATTERY_CURRENT_THRESHOLD) {
         battery_msg_.power_supply_status = sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_CHARGING;
     } else {
         battery_msg_.power_supply_status = sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING;
     }
 
     // 根据电量百分比判断是否充满
-    if (battery_msg_.percentage > 0.95f) {
+    if (battery_msg_.percentage > BATTERY_FULL_THRESHOLD) {
         battery_msg_.power_supply_status = sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_FULL;
     }
 
     // 根据电压和温度判断电池健康状态
-    if (battery_msg_.voltage < 10.0f) {  // 假设最低工作电压为10V
+    if (battery_msg_.voltage < BATTERY_MIN_VOLTAGE) {
         battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_DEAD;
-    } else if (temp_celsius > 60.0f) {  // 过热保护
-        battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_OVERHEAT;
-    } else if (temp_celsius < -10.0f) {  // 过冷保护
-        battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_COLD;
-    } else if (battery_msg_.voltage > 30.0f) {  // 假设最高安全电压为30V
+    } else if (battery_msg_.voltage > BATTERY_MAX_VOLTAGE) {
         battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+    } else if (temp_celsius > BATTERY_MAX_TEMP) {
+        battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_OVERHEAT;
+    } else if (temp_celsius < BATTERY_MIN_TEMP) {
+        battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_COLD;
     } else {
         battery_msg_.power_supply_health = sensor_msgs::BatteryState::POWER_SUPPLY_HEALTH_GOOD;
     }
 }
 
-float BatteryMonitor::convertVoltage(uint16_t raw_voltage) const
-{
-    // 电池电压放大了100倍存储
-    return static_cast<float>(raw_voltage) / 100.0f;
-}
-
-float BatteryMonitor::convertCurrent(int16_t raw_current) const
-{
-    // 电池电流放大了100倍存储，负值表示放电
-    return static_cast<float>(raw_current) / 100.0f;
-}
-
-float BatteryMonitor::convertTemperature(int8_t raw_temp) const
-{
-    // 温度直接以摄氏度存储
-    return static_cast<float>(raw_temp);
-}
-
-float BatteryMonitor::convertPercentage(uint8_t raw_level) const
-{
-    // 电量百分比，转换为0-1范围
-    return std::max(0.0f, std::min(1.0f, static_cast<float>(raw_level) / 100.0f));
-}
 
 } // namespace dr100_chassis_driver

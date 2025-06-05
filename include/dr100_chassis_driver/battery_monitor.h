@@ -57,10 +57,21 @@ private:
     void updateBatteryMessage(const FeedbackPacket& packet);
     
     // 数据转换辅助函数
-    float convertVoltage(uint16_t raw_voltage) const;
-    float convertCurrent(int16_t raw_current) const;
-    float convertTemperature(int8_t raw_temp) const;
-    float convertPercentage(uint8_t raw_level) const;
+    inline float convertVoltage(uint16_t raw_voltage) const noexcept {
+        return static_cast<float>(raw_voltage) * INV_BATTERY_VOLTAGE_SCALE;
+    }
+
+    inline float convertCurrent(int16_t raw_current) const noexcept {
+        return static_cast<float>(raw_current) * INV_BATTERY_CURRENT_SCALE;
+    }
+
+    inline float convertTemperature(int8_t raw_temp) const noexcept {
+        return static_cast<float>(raw_temp);
+    }
+
+    inline float convertPercentage(uint8_t raw_level) const noexcept {
+        return std::max(0.0f, std::min(1.0f, static_cast<float>(raw_level) * INV_BATTERY_PERCENTAGE_SCALE));
+    }
 };
 
 } // namespace dr100_chassis_driver

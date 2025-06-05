@@ -1,6 +1,7 @@
 #include "dr100_chassis_driver/chassis_controller.h"
 #include <algorithm>
 #include <functional>
+#include <numeric>
 
 using namespace dr100_chassis_driver;
 
@@ -11,20 +12,20 @@ ChassisController::ChassisController()
     , motor_enable_(true)
 {
     // 获取参数
-    private_nh_.param("port", port_name_, std::string("/tmp/ttyV1"));
+    private_nh_.param<std::string>("port", port_name_, "/tmp/ttyV1");
     private_nh_.param("baudrate", baudrate_, 115200);
     private_nh_.param("max_linear_velocity", max_linear_velocity_, 2.0);
     private_nh_.param("max_angular_velocity", max_angular_velocity_, 2.0);
     private_nh_.param("cmd_timeout", cmd_timeout_, 1.0);
     private_nh_.param("motor_enable", motor_enable_, true);
-    private_nh_.param("cmd_vel_topic", cmd_vel_topic_, std::string("/cmd_vel"));
-    private_nh_.param("odom_topic", odom_topic_, std::string("/odom"));
-    private_nh_.param("odom_frame_id", odom_frame_id_, std::string("odom"));
-    private_nh_.param("base_frame_id", base_frame_id_, std::string("base_link"));
+    private_nh_.param<std::string>("cmd_vel_topic", cmd_vel_topic_, "/cmd_vel");
+    private_nh_.param<std::string>("odom_topic", odom_topic_, "/odom");
+    private_nh_.param<std::string>("odom_frame_id", odom_frame_id_, "odom");
+    private_nh_.param<std::string>("base_frame_id", base_frame_id_, "base_link");
     private_nh_.param("reconnect_interval", reconnect_interval_, 2.0);
     private_nh_.param("max_reconnect_attempts", max_reconnect_attempts_, -1);
     private_nh_.param("odom_publish_rate", odom_publish_rate_, 50.0);
-    private_nh_.param("battery_topic", battery_topic_, std::string("/battery_state"));
+    private_nh_.param<std::string>("battery_topic", battery_topic_, "/battery_state");
     private_nh_.param("battery_publish_rate", battery_publish_rate_, 10.0);
 
     ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, battery_rate=%.1fHz",
@@ -104,6 +105,7 @@ void ChassisController::run()
     static const auto stop_packet = createControlPacket(0.0, 0.0, 0.0);
 
     // 状态显示计数器
+    constexpr int STATUS_DISPLAY_INTERVAL = 300; // 10Hz * 30s = 300
     int status_counter = 0;
     bool last_connected_status = false;
 
@@ -111,23 +113,21 @@ void ChassisController::run()
         const auto now = ros::Time::now();
 
         // 命令超时检查
-        if ((now - last_cmd_time_).toSec() > cmd_timeout_) {
+        const auto time_since_last_cmd = (now - last_cmd_time_).toSec();
+        if (time_since_last_cmd > cmd_timeout_) {
             serial_comm_->sendControlPacket(stop_packet);
         }
 
-        // 连接状态变化检测
-        bool current_connected = serial_comm_->isConnected();
+
+        const bool current_connected = serial_comm_->isConnected();
         if (current_connected != last_connected_status) {
-            if (current_connected) {
-                ROS_INFO("Serial port connected and ready");
-            } else {
-                ROS_WARN("Serial port disconnected, trying to reconnect...");
-            }
+            ROS_INFO_COND(current_connected, "Serial port connected and ready");
+            ROS_WARN_COND(!current_connected, "Serial port disconnected, trying to reconnect...");
             last_connected_status = current_connected;
         }
 
         // 每30秒显示一次状态（如果未连接）
-        if (++status_counter >= 300) { // 10Hz * 30s = 300
+        if (++status_counter >= STATUS_DISPLAY_INTERVAL) {
             status_counter = 0;
             if (!current_connected) {
                 ROS_INFO("Chassis controller running, waiting for serial connection to %s",
@@ -141,16 +141,18 @@ void ChassisController::run()
 
 void ChassisController::shutdown()
 {
-    if (shutdown_requested_) return;
+    // 原子操作检查和设置
+    bool expected = false;
+    if (!shutdown_requested_.compare_exchange_strong(expected, true)) {
+        return; // 已经在关闭过程中
+    }
 
     ROS_INFO("Shutting down ChassisController...");
-    shutdown_requested_ = true;
 
-    // 停止模块
+    // 并行停止模块
     if (serial_comm_) serial_comm_->stop();
     if (odom_publisher_) odom_publisher_->stop();
     if (battery_monitor_) battery_monitor_->stop();
-
     if (spinner_) spinner_->stop();
 
     ROS_INFO("Shutdown complete");
@@ -167,6 +169,7 @@ void ChassisController::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg
 
     const auto packet = createControlPacket(linear_x, linear_y, angular_z);
 
+    // 减少锁的持有时间
     std::lock_guard<std::mutex> lock(cmd_mutex_);
     if (serial_comm_->sendControlPacket(packet)) {
         last_cmd_time_ = ros::Time::now();
@@ -194,17 +197,15 @@ ControlPacket ChassisController::createControlPacket(double linear_x, double lin
     ControlPacket packet{};
     packet.frame_header = FRAME_HEADER;
     packet.motor_enable = motor_enable_ ? 1 : 0;
+
     packet.x_velocity = static_cast<int16_t>(linear_x * CONTROL_VEL_SCALE);
     packet.y_velocity = static_cast<int16_t>(linear_y * CONTROL_VEL_SCALE);
     packet.z_velocity = static_cast<int16_t>(angular_z * CONTROL_VEL_SCALE);
 
-    // 优化校验码计算
-    const uint8_t* data = reinterpret_cast<const uint8_t*>(&packet);
-    uint8_t checksum = 0;
-    for (size_t i = 0; i < CONTROL_CHECKSUM_LENGTH; ++i) {
-        checksum ^= data[i];
-    }
-    packet.checksum = checksum;
+    // 校验码计算
+    const auto* data = reinterpret_cast<const uint8_t*>(&packet);
+    packet.checksum = std::accumulate(data, data + CONTROL_CHECKSUM_LENGTH,
+                                     uint8_t{0}, std::bit_xor<uint8_t>());
     packet.frame_tail = FRAME_TAIL;
 
     return packet;

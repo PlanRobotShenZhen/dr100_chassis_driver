@@ -43,8 +43,8 @@ private:
 
     // 辅助函数
     template<typename T>
-    T clampValue(T value, T max_val) const {
-        return std::max(-max_val, std::min(max_val, value));
+    constexpr T clampValue(T value, T max_val) const noexcept {
+        return (value > max_val) ? max_val : ((value < -max_val) ? -max_val : value);
     }
 
     // 参数
