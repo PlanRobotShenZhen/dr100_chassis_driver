@@ -18,7 +18,7 @@ def create_robot_data_frame():
         # 基础数据
         'motor_enable': 0x01,       # 电机使能：bit0:0关电机，1开电机
         'fault_info': 0x00,         # 故障信息：0:正常 1:单电机故障 2：多电机故障
-        'robot_status': 0x00,       # 机器人系统状态：0：停止/待机，1：移动，2：故障，3：急停
+        'robot_status': 0x01,       # 机器人系统状态：0：停止/待机，1：移动，2：故障，3：急停
 
         # 速度信息 (实际物理值，打包时自动放大100倍) - 默认为0
         'x_velocity': 0.0,          # X轴线速度 m/s
@@ -26,10 +26,15 @@ def create_robot_data_frame():
         'z_velocity': 0.0,          # Z轴角速度 rad/s
 
         # 电池信息 (实际物理值，打包时自动放大100倍)
-        'battery_voltage': 24.0,    # 电池电压 V
-        'battery_current': 1.0,     # 电池电流 A
-        'battery_level': 85,        # 电池电量 %
-        'battery_temp': 25,         # 电池温度 ℃
+        # 'battery_voltage': 24.0,    # 电池电压 V
+        # 'battery_current': 1.0,     # 电池电流 A
+        # 'battery_level': 85,        # 电池电量 %
+        # 'battery_temp': 25,         # 电池温度 ℃
+
+        'battery_voltage': 0,    # 电池电压 V
+        'battery_current': 0,     # 电池电流 A
+        'battery_level': 0,        # 电池电量 %
+        'battery_temp': 0,         # 电池温度 ℃
 
         # 电机状态：0:待机，1：运行，2：故障,3:掉线
         'motor_status': [0x01, 0x01, 0x01, 0x01],
@@ -38,7 +43,7 @@ def create_robot_data_frame():
         'motor_faults': [0x0000, 0x0000, 0x0000, 0x0000],
 
         # 电机脉冲频率 pul/s (32位有符号整数)
-        'motor_pulses': [0, 0, 0, 0],
+        'motor_pulses': [-6149, -6133, 6149, 6149],
 
         # 里程计 (实际物理值m，打包时自动放大100倍) - 保持为0
         'odometry': 0.0
@@ -317,6 +322,8 @@ class VirtualSerialSimulator:
                 # 生成并发送反馈数据帧
                 frame = self.generate_frame()
                 self.serial_port.write(frame)
+                # hex_str = ' '.join(f'{byte:02X}' for byte in frame)
+                # print(f"发送的数据帧: {hex_str}")
 
                 # 只在有速度时显示详细信息
                 if (abs(self.data_frame['x_velocity']) > 0.001 or

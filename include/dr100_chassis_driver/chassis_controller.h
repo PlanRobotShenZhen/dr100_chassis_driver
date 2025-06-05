@@ -34,7 +34,7 @@ private:
     // 回调函数
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
     void onFeedbackReceived(const dr100_chassis_driver::FeedbackPacket& packet);
-    void onSerialError(const std::string& error_msg);
+    void onSerialError(const char* error_msg);
 
     // 数据处理函数
     dr100_chassis_driver::ControlPacket createControlPacket(double linear_x, double linear_y, double angular_z);

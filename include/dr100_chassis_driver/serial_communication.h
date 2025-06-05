@@ -17,7 +17,7 @@ class SerialCommunication
 public:
     // 回调函数类型定义
     using FeedbackCallback = std::function<void(const FeedbackPacket&)>;
-    using ErrorCallback = std::function<void(const std::string&)>;
+    using ErrorCallback = std::function<void(const char*)>;
 
     SerialCommunication();
     ~SerialCommunication();
@@ -52,7 +52,7 @@ private:
     void reconnectionThread();
 
     // 错误处理
-    void handleSerialError(const std::string& error_msg);
+    void handleSerialError(const char* error_msg);
 
     // 串口相关
     serial::Serial serial_port_;

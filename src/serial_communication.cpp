@@ -96,16 +96,17 @@ bool SerialCommunication::sendControlPacket(const ControlPacket& packet)
 
         if (!isConnected()) return false;
 
-        auto bytes_written = serial_port_.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
+        constexpr size_t packet_size = CONTROL_PACKET_SIZE;
+        auto bytes_written = serial_port_.write(reinterpret_cast<const uint8_t*>(&packet), packet_size);
 
-        if (bytes_written != sizeof(packet)) {
+        if (bytes_written != packet_size) {
             handleSerialError("Failed to write complete packet");
             return false;
         }
         return true;
 
     } catch (const std::exception& e) {
-        handleSerialError("Send packet failed: " + std::string(e.what()));
+        handleSerialError("Send packet failed");
         return false;
     }
 }
@@ -187,7 +188,11 @@ uint8_t SerialCommunication::calculateChecksum(const uint8_t* data, size_t lengt
 bool SerialCommunication::receiveFeedbackPacket(FeedbackPacket& packet)
 {
     try {
-        constexpr size_t REMAINING_BYTES = sizeof(FeedbackPacket) - 1;
+        constexpr size_t REMAINING_BYTES = FEEDBACK_PACKET_SIZE - 1;
+        constexpr size_t MIN_AVAILABLE = FEEDBACK_PACKET_SIZE;
+
+        // 快速检查可用数据
+        if (serial_port_.available() < MIN_AVAILABLE) return false;
 
         // 寻找帧头
         uint8_t byte;
@@ -207,21 +212,19 @@ bool SerialCommunication::receiveFeedbackPacket(FeedbackPacket& packet)
         auto packet_ptr = reinterpret_cast<uint8_t*>(&packet) + 1;
         auto bytes_read = serial_port_.read(packet_ptr, REMAINING_BYTES);
 
-        // 批量验证
-        bool valid_packet = (bytes_read == REMAINING_BYTES) &&
-                           (packet.frame_tail == FRAME_TAIL) &&
-                           (packet.checksum == calculateChecksum(
-                               reinterpret_cast<const uint8_t*>(&packet), FEEDBACK_CHECKSUM_LENGTH));
-
-        if (!valid_packet) {
-            ROS_WARN("Invalid packet: bytes=%zu, tail=0x%02X, checksum=0x%02X",
-                     bytes_read, packet.frame_tail, packet.checksum);
+        // 快速验证
+        if (bytes_read != REMAINING_BYTES || packet.frame_tail != FRAME_TAIL) {
+            return false;
         }
 
-        return valid_packet;
+        // 校验码验证
+        uint8_t calculated_checksum = calculateChecksum(
+            reinterpret_cast<const uint8_t*>(&packet), FEEDBACK_CHECKSUM_LENGTH);
 
-    } catch (const std::exception& e) {
-        handleSerialError("Receive packet failed: " + std::string(e.what()));
+        return packet.checksum == calculated_checksum;
+
+    } catch (const std::exception&) {
+        handleSerialError("Receive packet failed");
         return false;
     }
 }
@@ -231,17 +234,15 @@ void SerialCommunication::processSerialData()
     try {
         std::lock_guard<std::mutex> lock(serial_mutex_);
 
-        if (!isConnected() || serial_port_.available() < sizeof(FeedbackPacket)) return;
+        if (!isConnected()) return;
 
         FeedbackPacket packet;
-        if (receiveFeedbackPacket(packet)) {
-            if (feedback_callback_) {
-                feedback_callback_(packet);
-            }
+        if (receiveFeedbackPacket(packet) && feedback_callback_) {
+            feedback_callback_(packet);
         }
 
-    } catch (const std::exception& e) {
-        handleSerialError("Process serial failed: " + std::string(e.what()));
+    } catch (const std::exception&) {
+        handleSerialError("Process serial failed");
     }
 }
 
@@ -283,7 +284,7 @@ void SerialCommunication::reconnectionThread()
     ROS_INFO("Reconnection thread exiting");
 }
 
-void SerialCommunication::handleSerialError(const std::string& error_msg)
+void SerialCommunication::handleSerialError(const char* error_msg)
 {
     serial_connected_ = false;
     reconnect_cv_.notify_one();
@@ -291,7 +292,7 @@ void SerialCommunication::handleSerialError(const std::string& error_msg)
     if (error_callback_) {
         error_callback_(error_msg);
     } else {
-        ROS_ERROR("Serial error: %s", error_msg.c_str());
+        ROS_ERROR("Serial error: %s", error_msg);
     }
 }
 

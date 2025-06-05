@@ -14,6 +14,10 @@ constexpr double FEEDBACK_VEL_SCALE = 100.0;  // 反馈包速度放大倍数
 constexpr size_t CONTROL_CHECKSUM_LENGTH = 15;
 constexpr size_t FEEDBACK_CHECKSUM_LENGTH = 48;
 
+// 数据包大小常量
+constexpr size_t CONTROL_PACKET_SIZE = 17;
+constexpr size_t FEEDBACK_PACKET_SIZE = 50;
+
 // 上位机发送数据格式（17字节）
 struct ControlPacket {
     uint8_t frame_header;      // 0x7B

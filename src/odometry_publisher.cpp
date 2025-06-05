@@ -1,6 +1,7 @@
 #include "dr100_chassis_driver/odometry_publisher.h"
 #include <cmath>
 #include <algorithm>
+#include <cstring>
 
 namespace dr100_chassis_driver {
 
@@ -109,48 +110,56 @@ void OdometryPublisher::odomTimerCallback(const ros::TimerEvent& event)
 void OdometryPublisher::updateOdometry(double vx, double vy, double vth, double dt)
 {
     // 批量更新速度
-    vx_ = vx; 
-    vy_ = vy; 
+    vx_ = vx;
+    vy_ = vy;
     vth_ = vth;
 
     // 缓存三角函数计算避免重复
-    auto cos_th = cos(th_);
-    auto sin_th = sin(th_);
+    const auto cos_th = std::cos(th_);
+    const auto sin_th = std::sin(th_);
 
     // 计算位置增量
-    auto delta_x = (vx * cos_th - vy * sin_th) * dt;
-    auto delta_y = (vx * sin_th + vy * cos_th) * dt;
-    auto delta_th = vth * dt;
+    const auto delta_x = (vx * cos_th - vy * sin_th) * dt;
+    const auto delta_y = (vx * sin_th + vy * cos_th) * dt;
+    const auto delta_th = vth * dt;
 
     // 批量更新位置
-    x_ += delta_x; 
-    y_ += delta_y; 
+    x_ += delta_x;
+    y_ += delta_y;
     th_ += delta_th;
 
-    // 使用fmod优化角度归一化
-    th_ = fmod(th_ + M_PI, 2.0 * M_PI) - M_PI;
+    // 优化角度归一化（避免不必要的计算）
+    if (th_ > M_PI) {
+        th_ -= 2.0 * M_PI;
+    } else if (th_ < -M_PI) {
+        th_ += 2.0 * M_PI;
+    }
 }
 
 void OdometryPublisher::publishOdometry()
 {
-    // 避免重复的时间计算
-    auto current_time = ros::Time::now();
-    auto dt = (current_time - last_odom_time_).toSec();
+    // 缓存时间计算
+    const auto current_time = ros::Time::now();
+    const auto dt = (current_time - last_odom_time_).toSec();
     last_odom_time_ = current_time;
 
-    // 转换速度数据
-    auto vx = static_cast<double>(latest_feedback_.x_velocity) / FEEDBACK_VEL_SCALE;
-    auto vy = static_cast<double>(latest_feedback_.y_velocity) / FEEDBACK_VEL_SCALE;
-    auto vth = static_cast<double>(latest_feedback_.z_velocity) / FEEDBACK_VEL_SCALE;
+    // 转换速度数据（使用常量避免除法）
+    constexpr double inv_feedback_scale = 1.0 / FEEDBACK_VEL_SCALE;
+    const auto vx = static_cast<double>(latest_feedback_.x_velocity) * inv_feedback_scale;
+    const auto vy = static_cast<double>(latest_feedback_.y_velocity) * inv_feedback_scale;
+    const auto vth = static_cast<double>(latest_feedback_.z_velocity) * inv_feedback_scale;
 
     updateOdometry(vx, vy, vth, dt);
 
-    // 创建四元数
-    auto odom_quat = tf::createQuaternionMsgFromYaw(th_);
+    // 创建四元数（只计算一次）
+    const auto odom_quat = tf::createQuaternionMsgFromYaw(th_);
+
+    // 创建通用头部
+    auto header = createHeader(odom_frame_id_);
 
     // 发布TF变换
     geometry_msgs::TransformStamped odom_trans;
-    odom_trans.header = createHeader(odom_frame_id_);
+    odom_trans.header = header;
     odom_trans.child_frame_id = base_frame_id_;
     odom_trans.transform.translation.x = x_;
     odom_trans.transform.translation.y = y_;
@@ -160,7 +169,7 @@ void OdometryPublisher::publishOdometry()
 
     // 发布里程计消息
     nav_msgs::Odometry odom;
-    odom.header = createHeader(odom_frame_id_);
+    odom.header = std::move(header);
     odom.child_frame_id = base_frame_id_;
 
     // 位置和方向
@@ -174,18 +183,15 @@ void OdometryPublisher::publishOdometry()
     odom.twist.twist.linear.y = vy_;
     odom.twist.twist.angular.z = vth_;
 
-    // 设置协方差矩阵
-    bool is_stationary = (vx_ == 0 && vth_ == 0);
-    auto& pose_cov = is_stationary ? odom_pose_covariance2 : odom_pose_covariance;
-    auto& twist_cov = is_stationary ? odom_twist_covariance2 : odom_twist_covariance;
+    // 优化协方差矩阵设置
+    const bool is_stationary = (vx_ == 0.0 && vth_ == 0.0);
+    const auto* pose_cov = is_stationary ? odom_pose_covariance2 : odom_pose_covariance;
+    const auto* twist_cov = is_stationary ? odom_twist_covariance2 : odom_twist_covariance;
 
-    std::copy(pose_cov, pose_cov + 36, odom.pose.covariance.begin());
-    std::copy(twist_cov, twist_cov + 36, odom.twist.covariance.begin());
+    std::memcpy(odom.pose.covariance.data(), pose_cov, 36 * sizeof(double));
+    std::memcpy(odom.twist.covariance.data(), twist_cov, 36 * sizeof(double));
 
     odom_pub_.publish(odom);
-
-    ROS_DEBUG("Published odometry: pos(%.3f,%.3f,%.3f) vel(%.3f,%.3f,%.3f)",
-             x_, y_, th_, vx_, vy_, vth_);
 }
 
 std_msgs::Header OdometryPublisher::createHeader(const std::string& frame_id) const

@@ -93,10 +93,11 @@ void ChassisController::run()
 
     // 主线程：命令超时检查
     ros::Rate rate(10);
-    while (ros::ok() && !shutdown_requested_) {
-        auto now = ros::Time::now();
+    static const auto stop_packet = createControlPacket(0.0, 0.0, 0.0);
+
+    while (ros::ok() && !shutdown_requested_.load()) {
+        const auto now = ros::Time::now();
         if ((now - last_cmd_time_).toSec() > cmd_timeout_) {
-            static auto stop_packet = createControlPacket(0.0, 0.0, 0.0);
             serial_comm_->sendControlPacket(stop_packet);
         }
         rate.sleep();
@@ -121,33 +122,32 @@ void ChassisController::shutdown()
 
 void ChassisController::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
 {
-    if (!is_initialized_ || shutdown_requested_) return;
+    if (!is_initialized_.load() || shutdown_requested_.load()) return;
 
     // 速度限制
-    auto linear_x = clampValue(msg->linear.x, max_linear_velocity_);
-    auto linear_y = clampValue(msg->linear.y, max_linear_velocity_);
-    auto angular_z = clampValue(msg->angular.z, max_angular_velocity_);
+    const auto linear_x = clampValue(msg->linear.x, max_linear_velocity_);
+    const auto linear_y = clampValue(msg->linear.y, max_linear_velocity_);
+    const auto angular_z = clampValue(msg->angular.z, max_angular_velocity_);
 
-    auto packet = createControlPacket(linear_x, linear_y, angular_z);
+    const auto packet = createControlPacket(linear_x, linear_y, angular_z);
 
     std::lock_guard<std::mutex> lock(cmd_mutex_);
     if (serial_comm_->sendControlPacket(packet)) {
         last_cmd_time_ = ros::Time::now();
-        ROS_DEBUG("Sent cmd: [%.2f, %.2f, %.2f]", linear_x, linear_y, angular_z);
     }
 }
 
 void ChassisController::onFeedbackReceived(const FeedbackPacket& packet)
 {
-    if (!is_initialized_ || shutdown_requested_) return;
+    if (!is_initialized_.load() || shutdown_requested_.load()) return;
 
     // 将反馈数据传递给里程计发布模块
     odom_publisher_->processFeedbackPacket(packet);
 }
 
-void ChassisController::onSerialError(const std::string& error_msg)
+void ChassisController::onSerialError(const char* error_msg)
 {
-    ROS_ERROR("Serial communication error: %s", error_msg.c_str());
+    ROS_ERROR("Serial communication error: %s", error_msg);
 }
 
 ControlPacket ChassisController::createControlPacket(double linear_x, double linear_y, double angular_z)
@@ -159,9 +159,9 @@ ControlPacket ChassisController::createControlPacket(double linear_x, double lin
     packet.y_velocity = static_cast<int16_t>(linear_y * CONTROL_VEL_SCALE);
     packet.z_velocity = static_cast<int16_t>(angular_z * CONTROL_VEL_SCALE);
 
-    // 计算校验码
-    uint8_t checksum = 0;
+    // 优化校验码计算
     const uint8_t* data = reinterpret_cast<const uint8_t*>(&packet);
+    uint8_t checksum = 0;
     for (size_t i = 0; i < CONTROL_CHECKSUM_LENGTH; ++i) {
         checksum ^= data[i];
     }
