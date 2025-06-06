@@ -10,12 +10,14 @@
 - `odometry_publisher.cpp` - 里程计发布模块
 - `device_control.cpp` - 设备控制模块（车灯、超声波、充电、雷达、急停、电机使能等）
 - `battery_monitor.cpp` - 电池监控模块
+- `chassis_status_monitor.cpp` - 底盘状态监控模块
 
 2. **对应的头文件**
 - `serial_communication.h`
 - `odometry_publisher.h`
 - `device_control.h`
 - `battery_monitor.h`
+- `chassis_status_monitor.h`
 - `common_types.h` - 共享的数据结构和常量
 
 ## 功能特性
@@ -30,6 +32,7 @@
 - 设备控制功能（车灯、超声波、充电、雷达开关）
 - 安全控制功能（急停命令、电机使能开关）
 - 电池状态监控和发布
+- 底盘状态监控（电机使能状态、故障信息、机器人系统状态）
 
 ## 通讯协议
 
@@ -155,6 +158,10 @@ rosrun tf tf_echo robot_odom robot_base_link
 ### 发布的话题
 - 里程计话题 (nav_msgs/Odometry): 可通过`odom_topic`参数配置，默认为`/odom`
 - 电池状态话题 (sensor_msgs/BatteryState): 可通过`battery_topic`参数配置，默认为`/battery_state`
+- 电机使能状态话题 (std_msgs/Bool): 可通过`chassis_motor_enable_status_topic`参数配置，默认为`/chassis/motor_enable_status`
+- 故障状态话题 (std_msgs/UInt8): 可通过`chassis_fault_status_topic`参数配置，默认为`/chassis/fault_status`
+- 机器人系统状态话题 (std_msgs/UInt8): 可通过`chassis_robot_status_topic`参数配置，默认为`/chassis/robot_status`
+- 底盘诊断话题 (diagnostic_msgs/DiagnosticArray): 可通过`chassis_diagnostics_topic`参数配置，默认为`/chassis/diagnostics`
 
 ### 发布的TF变换
 - odom -> base_link: 机器人在里程计坐标系中的位置和姿态
@@ -309,6 +316,61 @@ python3 tools/test_device_switch.py help
 <param name="max_reconnect_attempts" value="-1" />
 ```
 
+## 底盘状态监控功能
+
+节点会监控底盘状态并发布到指定话题：
+
+### 电机使能状态 (motor_enable_status)
+- **false**: 电机关闭
+- **true**: 电机开启
+
+### 故障状态 (fault_status)
+- **0**: 正常
+- **1**: 单电机故障
+- **2**: 多电机故障
+
+### 机器人系统状态 (robot_status)
+- **0**: 停止/待机
+- **1**: 移动
+- **2**: 故障
+- **3**: 急停
+
+### 诊断信息
+底盘状态监控模块还会发布详细的诊断信息，包括：
+- 当前所有状态的文字描述
+- 根据故障和系统状态自动设置的诊断级别（OK/WARN/ERROR）
+- 状态变化时的日志记录
+
+### 底盘状态监控配置示例
+```xml
+<!-- 启用底盘状态监控，发布频率10Hz -->
+<param name="enable_chassis_status" value="true" />
+<param name="chassis_status_publish_rate" value="10.0" />
+
+<!-- 自定义话题名称 -->
+<param name="chassis_motor_enable_status_topic" value="/my_chassis/motor_enable_status" />
+<param name="chassis_fault_status_topic" value="/my_chassis/fault_status" />
+<param name="chassis_robot_status_topic" value="/my_chassis/robot_status" />
+<param name="chassis_diagnostics_topic" value="/my_chassis/diagnostics" />
+```
+
+### 底盘状态监控使用示例
+```bash
+# 查看电机使能状态
+rostopic echo /chassis/motor_enable_status
+
+# 查看故障状态
+rostopic echo /chassis/fault_status
+
+# 查看机器人系统状态
+rostopic echo /chassis/robot_status
+
+# 查看诊断信息
+rostopic echo /chassis/diagnostics
+```
+
+底盘状态监控模块会实时处理下位机反馈的状态信息，确保上层应用能够及时了解底盘的运行状态。
+
 ## 注意事项
 
 1. 确保串口设备有正确的读写权限
@@ -318,3 +380,4 @@ python3 tools/test_device_switch.py help
 5. 串口断开时，节点会自动尝试重连，无需手动重启
 6. 里程计发布频率会自动限制在0.1-1000Hz范围内，设置为≤0时将禁用里程计发布
 7. 即使禁用里程计发布，内部的里程计积分仍会继续进行，只是不发布消息
+8. 底盘状态监控发布频率会自动限制在0.1-100Hz范围内，设置为≤0时将禁用状态发布

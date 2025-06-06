@@ -8,6 +8,7 @@ project(dr100_chassis_driver)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  diagnostic_msgs
   geometry_msgs
   roscpp
   rospy
@@ -143,6 +144,7 @@ add_executable(${PROJECT_NAME}_node
   src/odometry_publisher.cpp
   src/battery_monitor.cpp
   src/device_control.cpp
+  src/chassis_status_monitor.cpp
   src/common_types.cpp
 )
 

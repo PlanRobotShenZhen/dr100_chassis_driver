@@ -36,6 +36,11 @@ ChassisController::ChassisController()
     private_nh_.param<std::string>("lidar_topic", lidar_topic_, "/lidar_switch");
     private_nh_.param<std::string>("emergency_topic", emergency_topic_, "/emergency_stop");
     private_nh_.param<std::string>("motor_enable_topic", motor_enable_topic_, "/motor_enable");
+    private_nh_.param<std::string>("chassis_motor_enable_status_topic", chassis_motor_enable_status_topic_, "/chassis/motor_enable_status");
+    private_nh_.param<std::string>("chassis_fault_status_topic", chassis_fault_status_topic_, "/chassis/fault_status");
+    private_nh_.param<std::string>("chassis_robot_status_topic", chassis_robot_status_topic_, "/chassis/robot_status");
+    private_nh_.param<std::string>("chassis_diagnostics_topic", chassis_diagnostics_topic_, "/chassis/diagnostics");
+    private_nh_.param("chassis_status_publish_rate", chassis_status_publish_rate_, 10.0);
 
     // 设备启用参数
     private_nh_.param("enable_light", enable_light_, true);
@@ -44,6 +49,7 @@ ChassisController::ChassisController()
     private_nh_.param("enable_lidar", enable_lidar_, true);
     private_nh_.param("enable_emergency", enable_emergency_, true);
     private_nh_.param("enable_motor_enable", enable_motor_enable_, true);
+    private_nh_.param("enable_chassis_status", enable_chassis_status_, true);
 
     ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, battery_rate=%.1fHz",
              port_name_.c_str(), baudrate_, odom_publish_rate_, battery_publish_rate_);
@@ -102,6 +108,17 @@ bool ChassisController::initialize()
         device_control_->setDeviceStateCallback(
             std::bind(&ChassisController::onDeviceStateChanged, this));
 
+        // 初始化底盘状态监控模块
+        if (enable_chassis_status_) {
+            chassis_status_monitor_ = std::make_unique<dr100_chassis_driver::ChassisStatusMonitor>();
+            if (!chassis_status_monitor_->initialize(nh_, chassis_motor_enable_status_topic_,
+                                                    chassis_fault_status_topic_, chassis_robot_status_topic_,
+                                                    chassis_diagnostics_topic_, chassis_status_publish_rate_)) {
+                ROS_ERROR("Failed to initialize chassis status monitor");
+                return false;
+            }
+        }
+
         // 初始化ROS组件
         cmd_vel_sub_ = nh_.subscribe(cmd_vel_topic_, 1, &ChassisController::cmdVelCallback, this);
         spinner_ = std::make_unique<ros::AsyncSpinner>(2);
@@ -133,6 +150,7 @@ void ChassisController::run()
     odom_publisher_->start();
     battery_monitor_->start();
     device_control_->start();
+    if (chassis_status_monitor_) chassis_status_monitor_->start();
 
     ROS_INFO("ChassisController started");
 
@@ -194,6 +212,7 @@ void ChassisController::shutdown()
     if (odom_publisher_) odom_publisher_->stop();
     if (battery_monitor_) battery_monitor_->stop();
     if (device_control_) device_control_->stop();
+    if (chassis_status_monitor_) chassis_status_monitor_->stop();
     if (spinner_) spinner_->stop();
 
     ROS_INFO("Shutdown complete");
@@ -231,6 +250,11 @@ void ChassisController::onFeedbackReceived(const FeedbackPacket& packet)
 
     // 将反馈数据传递给电池监控模块
     battery_monitor_->processFeedbackPacket(packet);
+
+    // 将反馈数据传递给底盘状态监控模块
+    if (chassis_status_monitor_) {
+        chassis_status_monitor_->processFeedbackPacket(packet);
+    }
 }
 
 void ChassisController::onSerialError(const char* error_msg)

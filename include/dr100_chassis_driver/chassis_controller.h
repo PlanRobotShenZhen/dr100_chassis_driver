@@ -11,6 +11,7 @@
 #include "dr100_chassis_driver/odometry_publisher.h"
 #include "dr100_chassis_driver/battery_monitor.h"
 #include "dr100_chassis_driver/device_control.h"
+#include "dr100_chassis_driver/chassis_status_monitor.h"
 
 class ChassisController
 {
@@ -34,6 +35,7 @@ private:
     std::unique_ptr<dr100_chassis_driver::OdometryPublisher> odom_publisher_;
     std::unique_ptr<dr100_chassis_driver::BatteryMonitor> battery_monitor_;
     std::unique_ptr<dr100_chassis_driver::DeviceControl> device_control_;
+    std::unique_ptr<dr100_chassis_driver::ChassisStatusMonitor> chassis_status_monitor_;
 
     // 回调函数
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
@@ -72,6 +74,11 @@ private:
     std::string lidar_topic_;
     std::string emergency_topic_;
     std::string motor_enable_topic_;
+    std::string chassis_motor_enable_status_topic_;
+    std::string chassis_fault_status_topic_;
+    std::string chassis_robot_status_topic_;
+    std::string chassis_diagnostics_topic_;
+    double chassis_status_publish_rate_;
 
     // 设备启用参数
     bool enable_light_;
@@ -80,6 +87,7 @@ private:
     bool enable_lidar_;
     bool enable_emergency_;
     bool enable_motor_enable_;
+    bool enable_chassis_status_;
 
     // 状态变量
     std::atomic<bool> is_initialized_;

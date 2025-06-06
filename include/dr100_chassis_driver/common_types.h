@@ -32,6 +32,25 @@ constexpr float BATTERY_MAX_VOLTAGE = 30.0f;
 constexpr float BATTERY_MAX_TEMP = 60.0f;
 constexpr float BATTERY_MIN_TEMP = -10.0f;
 
+// 底盘状态枚举定义
+enum class MotorEnableStatus : uint8_t {
+    DISABLED = 0,  // 电机关闭
+    ENABLED = 1    // 电机开启
+};
+
+enum class FaultStatus : uint8_t {
+    NORMAL = 0,           // 正常
+    SINGLE_MOTOR_FAULT = 1,  // 单电机故障
+    MULTI_MOTOR_FAULT = 2    // 多电机故障
+};
+
+enum class RobotSystemStatus : uint8_t {
+    STOP_STANDBY = 0,  // 停止/待机
+    MOVING = 1,        // 移动
+    FAULT = 2,         // 故障
+    EMERGENCY_STOP = 3 // 急停
+};
+
 // 数据包大小常量
 constexpr size_t CONTROL_PACKET_SIZE = 17;
 constexpr size_t FEEDBACK_PACKET_SIZE = 50;

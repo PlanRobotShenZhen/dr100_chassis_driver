@@ -131,9 +131,9 @@ def test_switch_immediate_update():
 
     if 'motor_enable' in publishers:
         test_cases.extend([
-            ("开启电机", lambda: publishers['motor_enable'].publish(Bool(data=True))),
-            ("等待1秒", lambda: time.sleep(1.0)),
             ("关闭电机", lambda: publishers['motor_enable'].publish(Bool(data=False))),
+            ("等待1秒", lambda: time.sleep(1.0)),
+            ("开启电机", lambda: publishers['motor_enable'].publish(Bool(data=True))),
             ("等待1秒", lambda: time.sleep(1.0)),
         ])
 

@@ -25,14 +25,6 @@
         <!-- 里程计发布频率参数 -->
         <param name="odom_publish_rate" value="50.0" />
 
-        <!-- 重连参数 -->
-        <param name="reconnect_interval" value="2.0" />
-        <param name="max_reconnect_attempts" value="-1" />
-
-        <!-- 电池监控参数 -->
-        <param name="battery_topic" value="/battery_state" />
-        <param name="battery_publish_rate" value="10.0" />
-
         <!-- 设备控制话题参数 -->
         <param name="light_topic" value="/light_switch" />
         <param name="ultrasonic_topic" value="/ultrasonic_switch" />
@@ -42,7 +34,14 @@
         <!-- 安全控制话题参数 -->
         <param name="emergency_topic" value="/emergency_stop" />
         <param name="motor_enable_topic" value="/motor_enable" />
-        
+
+        <!-- 底盘状态监控话题参数 -->
+        <param name="chassis_motor_enable_status_topic" value="/chassis/motor_enable_status" />
+        <param name="chassis_fault_status_topic" value="/chassis/fault_status" />
+        <param name="chassis_robot_status_topic" value="/chassis/robot_status" />
+        <param name="chassis_diagnostics_topic" value="/chassis/diagnostics" />
+        <param name="chassis_status_publish_rate" value="10.0" />
+
         <!-- 设备启用参数 - 最小配置：只启用基本功能 -->
         <param name="enable_light" value="false" />          <!-- 禁用车灯控制 -->
         <param name="enable_ultrasonic" value="false" />    <!-- 禁用超声波控制 -->
@@ -50,5 +49,14 @@
         <param name="enable_lidar" value="false" />         <!-- 禁用雷达控制 -->
         <param name="enable_emergency" value="true" />      <!-- 保留急停功能 -->
         <param name="enable_motor_enable" value="true" />   <!-- 保留电机使能 -->
+        <param name="enable_chassis_status" value="true" /> <!-- 保留底盘状态监控 -->
+
+        <!-- 电池监控参数 -->
+        <param name="battery_topic" value="/battery_state" />
+        <param name="battery_publish_rate" value="10.0" />
+
+        <!-- 重连参数 -->
+        <param name="reconnect_interval" value="2.0" />
+        <param name="max_reconnect_attempts" value="-1" />
     </node>
 </launch>

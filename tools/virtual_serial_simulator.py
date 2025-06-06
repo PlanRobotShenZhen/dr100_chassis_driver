@@ -15,80 +15,67 @@ def create_robot_data_frame():
         'frame_header': 0x7B,
         'frame_tail': 0x7D,
 
-        # 基础数据
-        'motor_enable': 0x01,       # 电机使能：bit0:0关电机，1开电机
-        'fault_info': 0x00,         # 故障信息：0:正常 1:单电机故障 2：多电机故障
-        'robot_status': 0x01,       # 机器人系统状态：0：停止/待机，1：移动，2：故障，3：急停
+        # 基础状态
+        'motor_enable': 0x01,       # 电机使能：0关电机，1开电机
+        'fault_info': 0x00,         # 故障信息：0正常，1单电机故障，2多电机故障
+        'robot_status': 0x01,       # 机器人系统状态：0停止/待机，1移动，2故障，3急停
 
-        # 速度信息 (实际物理值，打包时自动放大100倍) - 默认为0
+        # 设备开关状态（用于模拟实际设备状态，不参与数据包打包）
+        'light_state': 0x00,        # 车灯状态：0关闭，1开启
+        'ultrasonic_state': 0x00,   # 超声波状态：0关闭，1开启
+        'charge_state': 0x00,       # 充电状态：0关闭，1开启
+        'lidar_state': 0x00,        # 雷达状态：0关闭，1开启
+
+        # 速度信息（实际物理值，打包时自动放大100倍）
         'x_velocity': 0.0,          # X轴线速度 m/s
         'y_velocity': 0.0,          # Y轴线速度 m/s
         'z_velocity': 0.0,          # Z轴角速度 rad/s
 
-        # 电池信息 (实际物理值，打包时自动放大100倍)
-        # 'battery_voltage': 24.0,    # 电池电压 V
-        # 'battery_current': 1.0,     # 电池电流 A
-        # 'battery_level': 85,        # 电池电量 %
-        # 'battery_temp': 25,         # 电池温度 ℃
+        # 电池信息（实际物理值，打包时自动放大100倍）
+        'battery_voltage': 0,       # 电池电压 V
+        'battery_current': 0,       # 电池电流 A
+        'battery_level': 0,         # 电池电量 %
+        'battery_temp': 0,          # 电池温度 ℃
 
-        'battery_voltage': 0,    # 电池电压 V
-        'battery_current': 0,     # 电池电流 A
-        'battery_level': 0,        # 电池电量 %
-        'battery_temp': 0,         # 电池温度 ℃
-
-        # 电机状态：0:待机，1：运行，2：故障,3:掉线
+        # 电机状态：0待机，1运行，2故障，3掉线
         'motor_status': [0x01, 0x01, 0x01, 0x01],
-
         # 电机故障信息：每个位代表一种故障可能
         'motor_faults': [0x0000, 0x0000, 0x0000, 0x0000],
-
-        # 电机脉冲频率 pul/s (32位有符号整数)
+        # 电机脉冲频率 pul/s（32位有符号整数）
         'motor_pulses': [-6149, -6133, 6149, 6149],
 
-        # 里程计 (实际物理值m，打包时自动放大100倍) - 保持为0
+        # 里程计（实际物理值m，打包时自动放大100倍）
         'odometry': 0.0
     }
 
 
 def parse_control_packet(data):
     """解析上位机发送的控制数据包"""
-    if len(data) != 17:
-        return None
-
-    # 验证帧头和帧尾
-    if data[0] != 0x7B or data[16] != 0x7D:
+    if len(data) != 17 or data[0] != 0x7B or data[16] != 0x7D:
         return None
 
     # 验证校验码
     checksum = 0
     for i in range(15):
         checksum ^= data[i]
-
     if data[15] != checksum:
         print(f"校验码错误: 期望 0x{checksum:02X}, 收到 0x{data[15]:02X}")
         return None
 
-    # 如果校验通过，则输出获取的数据
+    # 输出接收到的数据包（总是输出，用于调试）
     hex_str = ' '.join(f'{byte:02X}' for byte in data)
-    print(f"接收到的数据帧: {hex_str}")
-    
-    # 解析速度数据（放大1000倍的int16）
-    x_velocity_raw = struct.unpack('<h', data[4:6])[0]
-    y_velocity_raw = struct.unpack('<h', data[6:8])[0]
-    z_velocity_raw = struct.unpack('<h', data[8:10])[0]
+    print(f"接收到的数据包: {hex_str}")
 
-    # 转换为实际物理值（除以1000）
-    x_velocity = x_velocity_raw / 1000.0
-    y_velocity = y_velocity_raw / 1000.0
-    z_velocity = z_velocity_raw / 1000.0
+    # 解析速度数据
+    x_vel, y_vel, z_vel = struct.unpack('<hhh', data[4:10])
 
     return {
         'motor_enable': data[1],
         'emergency_stop': data[2],
         'light_control': data[3],
-        'x_velocity': x_velocity,
-        'y_velocity': y_velocity,
-        'z_velocity': z_velocity,
+        'x_velocity': x_vel / 1000.0,
+        'y_velocity': y_vel / 1000.0,
+        'z_velocity': z_vel / 1000.0,
         'ultrasonic_switch': data[10],
         'charge_switch': data[11],
         'lidar_switch': data[12]
@@ -96,60 +83,49 @@ def parse_control_packet(data):
 
 
 def pack_data_frame(data_frame):
-    """将数据帧字典打包成二进制格式，按照CSV协议规范"""
-    data = bytearray()
+    """将数据帧字典打包成二进制格式"""
+    data = bytearray([data_frame['frame_header']])
 
-    # 帧头 (0x7B)
-    data.append(data_frame['frame_header'])
+    # 基础状态
+    data.extend([
+        data_frame['motor_enable'],
+        data_frame['fault_info'],
+        data_frame['robot_status']
+    ])
 
-    # 电机使能、故障信息、系统状态
-    data.append(data_frame['motor_enable'])
-    data.append(data_frame['fault_info'])
-    data.append(data_frame['robot_status'])
-
-    # 速度信息 (放大100倍后打包为short)
-    x_vel_scaled = int(data_frame['x_velocity'] * 100)
-    y_vel_scaled = int(data_frame['y_velocity'] * 100)
-    z_vel_scaled = int(data_frame['z_velocity'] * 100)
-    data.extend(struct.pack('<hhh', x_vel_scaled, y_vel_scaled, z_vel_scaled))
+    # 速度信息 (放大100倍)
+    data.extend(struct.pack('<hhh',
+        int(data_frame['x_velocity'] * 100),
+        int(data_frame['y_velocity'] * 100),
+        int(data_frame['z_velocity'] * 100)
+    ))
 
     # 电池信息
-    battery_voltage_scaled = int(data_frame['battery_voltage'] * 100)  # 放大100倍
-    battery_current_scaled = int(data_frame['battery_current'] * 100)  # 放大100倍
     data.extend(struct.pack('<HhBb',
-                           battery_voltage_scaled,
-                           battery_current_scaled,
-                           data_frame['battery_level'],
-                           data_frame['battery_temp']))
+        int(data_frame['battery_voltage'] * 100),
+        int(data_frame['battery_current'] * 100),
+        data_frame['battery_level'],
+        data_frame['battery_temp']
+    ))
 
-    # 电机状态 (4个字节)
-    for status in data_frame['motor_status']:
-        data.append(status)
+    # 电机状态
+    data.extend(data_frame['motor_status'])
 
-    # 电机故障信息和脉冲数 (每个电机6字节：2字节故障+4字节脉冲)
+    # 电机故障和脉冲
     for i in range(4):
-        # 电机故障信息 (u16)
         data.extend(struct.pack('<H', data_frame['motor_faults'][i]))
-        # 电机脉冲数 (u32，按CSV协议分为低字节和高字节)
         pulse = data_frame['motor_pulses'][i]
-        pulse_low = pulse & 0xFFFF
-        pulse_high = (pulse >> 16) & 0xFFFF
-        data.extend(struct.pack('<HH', pulse_low, pulse_high))
+        data.extend(struct.pack('<HH', pulse & 0xFFFF, (pulse >> 16) & 0xFFFF))
 
-    # 里程计 (放大100倍后打包为u32，按CSV协议分为低字节和高字节)
-    odometry_scaled = int(data_frame['odometry'] * 100)
-    odometry_low = odometry_scaled & 0xFFFF
-    odometry_high = (odometry_scaled >> 16) & 0xFFFF
-    data.extend(struct.pack('<HH', odometry_low, odometry_high))
+    # 里程计
+    odometry = int(data_frame['odometry'] * 100)
+    data.extend(struct.pack('<HH', odometry & 0xFFFF, (odometry >> 16) & 0xFFFF))
 
-    # 计算校验和 (对0-47位进行异或运算)
+    # 校验和
     checksum = 0
     for byte in data:
         checksum ^= byte
-
-    # 添加校验和和帧尾
-    data.append(checksum)
-    data.append(data_frame['frame_tail'])
+    data.extend([checksum, data_frame['frame_tail']])
 
     return bytes(data)
 
@@ -195,36 +171,20 @@ def set_motor_pulse(data_frame, index, pulse):
 
 
 class VirtualSerialSimulator:
-    def __init__(self, baudrate=115200):
-        # 创建虚拟串口对
-        self.pty_process = None
-        self.virtual_port_master = None
-        self.virtual_port_slave = None
+    def __init__(self, baudrate=115200, show_packets=False):
         self.create_virtual_serial_ports()
-
-        # 连接到虚拟串口
         self.serial_port = serial.Serial(
             port=self.virtual_port_master,
             baudrate=baudrate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
             timeout=1
         )
-
-        # 注册退出处理函数
         atexit.register(self.cleanup)
 
-        # 创建数据帧字典
         self.data_frame = create_robot_data_frame()
-
-        # 接收缓冲区
         self.receive_buffer = bytearray()
-
-        # 用于检测速度变化的上一次速度值
         self.last_velocity = {'x': 0.0, 'y': 0.0, 'z': 0.0}
-        # 用于检测发送速度反馈变化的上一次速度值
         self.last_feedback_velocity = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        self.show_packets = show_packets
         
     def create_virtual_serial_ports(self):
         """创建虚拟串口对"""
@@ -258,136 +218,117 @@ class VirtualSerialSimulator:
 
     def process_received_data(self):
         """处理接收到的上位机数据"""
+        if self.serial_port.in_waiting <= 0:
+            return
+
         try:
-            # 检查是否有数据可读
-            if self.serial_port.in_waiting > 0:
-                # 读取所有可用数据
-                new_data = self.serial_port.read(self.serial_port.in_waiting)
-                self.receive_buffer.extend(new_data)
+            self.receive_buffer.extend(self.serial_port.read(self.serial_port.in_waiting))
 
-                # 查找完整的数据包（17字节）
-                while len(self.receive_buffer) >= 17:
-                    # 寻找帧头
-                    header_index = -1
-                    for i in range(len(self.receive_buffer) - 16):
-                        if self.receive_buffer[i] == 0x7B:
-                            header_index = i
-                            break
+            while len(self.receive_buffer) >= 17:
+                # 寻找帧头
+                header_index = next((i for i in range(len(self.receive_buffer) - 16)
+                                   if self.receive_buffer[i] == 0x7B), -1)
 
-                    if header_index == -1:
-                        # 没有找到帧头，清空缓冲区
-                        self.receive_buffer.clear()
-                        break
+                if header_index == -1:
+                    self.receive_buffer.clear()
+                    break
 
-                    # 移除帧头之前的数据
-                    if header_index > 0:
-                        self.receive_buffer = self.receive_buffer[header_index:]
+                if header_index > 0:
+                    self.receive_buffer = self.receive_buffer[header_index:]
 
-                    # 检查是否有完整的数据包
-                    if len(self.receive_buffer) >= 17:
-                        packet_data = bytes(self.receive_buffer[:17])
-                        self.receive_buffer = self.receive_buffer[17:]
+                if len(self.receive_buffer) >= 17:
+                    packet_data = bytes(self.receive_buffer[:17])
+                    self.receive_buffer = self.receive_buffer[17:]
 
-                        # 解析控制数据包
-                        control_data = parse_control_packet(packet_data)
-                        if control_data:
-                            # 检查速度是否发生变化
-                            velocity_changed = (
-                                abs(control_data['x_velocity'] - self.last_velocity['x']) > 0.001 or
-                                abs(control_data['y_velocity'] - self.last_velocity['y']) > 0.001 or
-                                abs(control_data['z_velocity'] - self.last_velocity['z']) > 0.001
-                            )
-
-                            # 更新速度反馈
-                            self.data_frame['x_velocity'] = control_data['x_velocity']
-                            self.data_frame['y_velocity'] = control_data['y_velocity']
-                            self.data_frame['z_velocity'] = control_data['z_velocity']
-
-                            # 更新电机使能状态
-                            self.data_frame['motor_enable'] = control_data['motor_enable']
-
-                            # 显示开关状态变化
-                            switch_status = []
-                            if control_data['light_control'] != 0:
-                                status = "开启" if control_data['light_control'] == 1 else "关闭"
-                                switch_status.append(f"车灯:{status}")
-                            if control_data['ultrasonic_switch'] != 0:
-                                status = "开启" if control_data['ultrasonic_switch'] == 1 else "关闭"
-                                switch_status.append(f"超声波:{status}")
-                            if control_data['charge_switch'] != 0:
-                                status = "开启" if control_data['charge_switch'] == 1 else "关闭"
-                                switch_status.append(f"充电:{status}")
-                            if control_data['lidar_switch'] != 0:
-                                status = "开启" if control_data['lidar_switch'] == 1 else "关闭"
-                                switch_status.append(f"雷达:{status}")
-
-                            if switch_status:
-                                print(f"设备控制: {', '.join(switch_status)}")
-
-                            # 只在速度变化时输出
-                            if velocity_changed:
-                                print(f"接收到速度命令: x={control_data['x_velocity']:.3f}, "
-                                      f"y={control_data['y_velocity']:.3f}, z={control_data['z_velocity']:.3f}")
-
-                                # 更新上一次速度值
-                                self.last_velocity['x'] = control_data['x_velocity']
-                                self.last_velocity['y'] = control_data['y_velocity']
-                                self.last_velocity['z'] = control_data['z_velocity']
-                    else:
-                        break
-
+                    control_data = parse_control_packet(packet_data)
+                    if control_data:
+                        self.update_velocity(control_data)
+                        self.update_switches(control_data)
+                else:
+                    break
         except Exception as e:
             print(f"处理接收数据时出错: {e}")
 
+    def update_velocity(self, control_data):
+        """更新速度信息"""
+        velocity_changed = any(
+            abs(control_data[f'{axis}_velocity'] - self.last_velocity[axis]) > 0.001
+            for axis in ['x', 'y', 'z']
+        )
+
+        for axis in ['x', 'y', 'z']:
+            self.data_frame[f'{axis}_velocity'] = control_data[f'{axis}_velocity']
+
+        if velocity_changed:
+            print(f"接收到速度命令: x={control_data['x_velocity']:.3f}, "
+                  f"y={control_data['y_velocity']:.3f}, z={control_data['z_velocity']:.3f}")
+            self.last_velocity.update({
+                'x': control_data['x_velocity'],
+                'y': control_data['y_velocity'],
+                'z': control_data['z_velocity']
+            })
+
+    def update_switches(self, control_data):
+        """更新设备开关状态"""
+        switches = [
+            ('motor_enable', 'motor_enable', '电机使能'),
+            ('light_control', 'light_state', '车灯'),
+            ('ultrasonic_switch', 'ultrasonic_state', '超声波'),
+            ('charge_switch', 'charge_state', '充电'),
+            ('lidar_switch', 'lidar_state', '雷达')
+        ]
+
+        switch_status = []
+        for cmd_key, state_key, name in switches:
+            cmd_value = control_data[cmd_key]
+            if cmd_value == 1 and self.data_frame[state_key] != 0x01:
+                self.data_frame[state_key] = 0x01
+                switch_status.append(f"{name}:开启")
+            elif cmd_value == 2 and self.data_frame[state_key] != 0x00:
+                self.data_frame[state_key] = 0x00
+                switch_status.append(f"{name}:关闭")
+
+        if switch_status:
+            print(f"设备控制: {', '.join(switch_status)}")
+
     def generate_frame(self):
         """生成数据帧"""
-        # 里程计保持为0，不需要更新
-
         # 根据速度更新机器人状态
-        if abs(self.data_frame['x_velocity']) > 0.001 or abs(self.data_frame['z_velocity']) > 0.001:
-            self.data_frame['robot_status'] = 0x01  # 移动
-        else:
-            self.data_frame['robot_status'] = 0x00  # 停止/待机
+        self.data_frame['robot_status'] = 0x01 if (
+            abs(self.data_frame['x_velocity']) > 0.001 or
+            abs(self.data_frame['z_velocity']) > 0.001
+        ) else 0x00
 
-        # 打包数据
         return pack_data_frame(self.data_frame)
-        
+
     def run(self):
         """运行模拟器"""
-        try:
-            print("虚拟串口模拟器已启动，等待上位机连接...")
-            print("默认速度为0，将根据接收到的命令更新速度反馈")
-            print("按Ctrl+C停止...")
+        print("虚拟串口模拟器已启动，等待上位机连接...")
+        print("按Ctrl+C停止...")
 
+        try:
             while True:
-                # 处理接收到的上位机数据
                 self.process_received_data()
 
                 # 生成并发送反馈数据帧
                 frame = self.generate_frame()
                 self.serial_port.write(frame)
-                # hex_str = ' '.join(f'{byte:02X}' for byte in frame)
-                # print(f"发送的数据帧: {hex_str}")
 
-                # 检查发送速度反馈是否发生变化
-                feedback_velocity_changed = (
-                    abs(self.data_frame['x_velocity'] - self.last_feedback_velocity['x']) > 0.001 or
-                    abs(self.data_frame['y_velocity'] - self.last_feedback_velocity['y']) > 0.001 or
-                    abs(self.data_frame['z_velocity'] - self.last_feedback_velocity['z']) > 0.001
-                )
+                # 输出发送的数据包（可选）
+                if self.show_packets:
+                    hex_str = ' '.join(f'{byte:02X}' for byte in frame)
+                    print(f"发送的数据包: {hex_str}")
 
-                # 只在速度反馈发生变化时输出
-                if feedback_velocity_changed:
+                # 检查速度反馈变化
+                if any(abs(self.data_frame[f'{axis}_velocity'] - self.last_feedback_velocity[axis]) > 0.001
+                       for axis in ['x', 'y', 'z']):
                     print(f"发送速度反馈: x={self.data_frame['x_velocity']:.3f}, "
                           f"y={self.data_frame['y_velocity']:.3f}, z={self.data_frame['z_velocity']:.3f}")
 
-                    # 更新上一次反馈速度值
-                    self.last_feedback_velocity['x'] = self.data_frame['x_velocity']
-                    self.last_feedback_velocity['y'] = self.data_frame['y_velocity']
-                    self.last_feedback_velocity['z'] = self.data_frame['z_velocity']
+                    for axis in ['x', 'y', 'z']:
+                        self.last_feedback_velocity[axis] = self.data_frame[f'{axis}_velocity']
 
-                time.sleep(0.1)  # 每100ms发送一次
-
+                time.sleep(0.1)
         except KeyboardInterrupt:
             print("\n停止模拟器")
         finally:
@@ -415,10 +356,12 @@ if __name__ == "__main__":
                         help='设置机器人速度 (m/s, m/s, rad/s)')
     parser.add_argument('--battery', type=float, nargs=4, metavar=('V', 'A', 'LEVEL', 'TEMP'),
                         help='设置电池信息 (电压V, 电流A, 电量%, 温度℃)')
+    parser.add_argument('--show-packets', action='store_true',
+                        help='显示所有发送的数据包（默认只显示接收的数据包）')
 
     args = parser.parse_args()
 
-    simulator = VirtualSerialSimulator(baudrate=args.baudrate)
+    simulator = VirtualSerialSimulator(baudrate=args.baudrate, show_packets=args.show_packets)
 
     # 应用命令行参数
     if args.velocity:
