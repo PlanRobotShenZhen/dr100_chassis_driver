@@ -64,12 +64,37 @@ catkin_make
 ### 2. 启动虚拟串口模拟器（用于测试）
 ```bash
 cd ~/catkin_ws/src/dr100/dr100_chassis_driver
-python3 virtual_serial_simulator.py
+python3 tools/virtual_serial_simulator.py
+```
+
+#### 虚拟串口模拟器高级用法
+```bash
+# 基本启动
+python3 tools/virtual_serial_simulator.py
+
+# 指定波特率
+python3 tools/virtual_serial_simulator.py --baudrate 115200
+
+# 设置初始速度
+python3 tools/virtual_serial_simulator.py --velocity 0.5 0.0 0.2
+
+# 设置电池信息（电压V，电流A，电量%，温度℃）
+python3 tools/virtual_serial_simulator.py --battery 24.0 -2.5 85 25
+
+# 显示所有数据包（用于调试）
+python3 tools/virtual_serial_simulator.py --show-packets
+
+# 组合使用
+python3 tools/virtual_serial_simulator.py --velocity 0.3 0.0 0.1 --battery 23.8 -1.8 75 28 --show-packets
 ```
 
 ### 3. 启动底盘控制器
 ```bash
+# 使用完整配置启动
 roslaunch dr100_chassis_driver chassis_controller.launch
+
+# 使用最小配置启动（仅基本功能）
+roslaunch dr100_chassis_driver chassis_controller_minimal.launch
 ```
 
 ### 4. 发送速度命令
@@ -143,6 +168,12 @@ rosrun tf tf_echo robot_odom robot_base_link
 - `enable_lidar`: 是否启用雷达控制话题（默认：true）
 - `enable_emergency`: 是否启用急停控制话题（默认：true）
 - `enable_motor_enable`: 是否启用电机使能控制话题（默认：true）
+- `enable_chassis_status`: 是否启用底盘状态监控功能（默认：true）
+- `chassis_status_publish_rate`: 底盘状态发布频率（默认：10.0 Hz）
+- `chassis_motor_enable_status_topic`: 电机使能状态话题名称（默认：/chassis/motor_enable_status）
+- `chassis_fault_status_topic`: 故障状态话题名称（默认：/chassis/fault_status）
+- `chassis_robot_status_topic`: 机器人系统状态话题名称（默认：/chassis/robot_status）
+- `chassis_diagnostics_topic`: 底盘诊断话题名称（默认：/chassis/diagnostics）
 
 ## 话题
 
@@ -266,7 +297,6 @@ rostopic pub /motor_enable std_msgs/Bool "data: false"
 
 ### 设备控制测试
 详细的测试方法和配置示例请参考：
-- `tools/device_control_test_guide.md` - 完整的测试指南
 - `tools/test_device_switch.py` - 自动化测试脚本
 - `launch/chassis_controller_minimal.launch` - 最小配置示例
 
@@ -277,6 +307,12 @@ python3 tools/test_device_switch.py
 
 # 查看测试帮助
 python3 tools/test_device_switch.py help
+
+# 测试开关状态变化与速度命令的组合
+python3 tools/test_device_switch.py velocity
+
+# 测试自动重置功能
+python3 tools/test_device_switch.py reset
 ```
 
 ## 自动重连功能
@@ -371,13 +407,158 @@ rostopic echo /chassis/diagnostics
 
 底盘状态监控模块会实时处理下位机反馈的状态信息，确保上层应用能够及时了解底盘的运行状态。
 
+## 工具和测试
+
+### 工具目录结构
+```
+tools/
+├── virtual_serial_simulator.py    # 虚拟串口模拟器
+├── test_device_switch.py          # 设备开关测试脚本
+└── asset/                         # 资源文件目录
+    ├── BatteryState.md            # 电池状态文档
+    └── example/                   # 示例文件
+        ├── 上位机发送数据.csv      # 上位机数据包示例
+        ├── 下位机发送的数据.csv    # 下位机数据包示例
+        ├── 其他的odom模板.txt      # 里程计模板
+        └── 完整的odom.txt         # 完整里程计示例
+```
+
+### 虚拟串口模拟器功能
+虚拟串口模拟器(`tools/virtual_serial_simulator.py`)提供以下功能：
+
+1. **自动创建虚拟串口对**：使用socat创建/tmp/ttyV0和/tmp/ttyV1
+2. **协议解析**：完整解析上位机17字节控制包
+3. **数据包生成**：生成标准的50字节反馈包
+4. **设备状态模拟**：模拟车灯、超声波、充电、雷达等设备状态
+5. **实时反馈**：根据接收的命令实时更新速度和设备状态
+6. **调试输出**：可选择显示所有收发数据包用于调试
+
+### 设备开关测试脚本功能
+设备开关测试脚本(`tools/test_device_switch.py`)提供以下测试功能：
+
+1. **自动检测可用话题**：检测当前运行的chassis_controller支持的设备话题
+2. **立即更新测试**：测试设备开关状态的立即更新功能
+3. **组合测试**：测试多个设备同时开关的功能
+4. **速度组合测试**：测试在运动状态下的设备开关功能
+5. **急停测试**：测试急停功能在各种状态下的表现
+6. **自动重置测试**：测试2秒后开关状态自动重置功能
+
+### 完整测试流程
+
+#### 1. 基础功能测试
+```bash
+# 终端1：启动虚拟串口模拟器
+cd ~/catkin_ws/src/dr100/dr100_chassis_driver
+python3 tools/virtual_serial_simulator.py --show-packets
+
+# 终端2：启动底盘控制器
+roslaunch dr100_chassis_driver chassis_controller.launch
+
+# 终端3：测试速度控制
+rostopic pub /cmd_vel geometry_msgs/Twist "linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}"
+
+# 终端4：查看里程计
+rostopic echo /odom
+```
+
+#### 2. 设备控制测试
+```bash
+# 运行自动化设备测试
+python3 tools/test_device_switch.py
+
+# 手动测试单个设备
+rostopic pub /light_switch std_msgs/Bool "data: true"
+rostopic pub /emergency_stop std_msgs/Bool "data: true"
+```
+
+#### 3. 状态监控测试
+```bash
+# 查看底盘状态
+rostopic echo /chassis/motor_enable_status
+rostopic echo /chassis/fault_status
+rostopic echo /chassis/robot_status
+rostopic echo /chassis/diagnostics
+
+# 查看电池状态
+rostopic echo /battery_state
+```
+
+### 资源文件说明
+
+#### BatteryState.md
+包含电池状态消息的详细说明和使用示例，描述了sensor_msgs/BatteryState消息的各个字段含义。
+
+#### 示例文件
+- **上位机发送数据.csv**：包含上位机发送的17字节控制包的详细格式和示例数据
+- **下位机发送的数据.csv**：包含下位机发送的50字节反馈包的详细格式和示例数据
+- **里程计模板文件**：提供nav_msgs/Odometry消息的格式模板和完整示例
+
+## 故障排除
+
+### 常见问题及解决方案
+
+#### 1. 串口权限问题
+```bash
+# 检查串口权限
+ls -l /dev/ttyUSB* /tmp/ttyV*
+
+# 添加用户到dialout组
+sudo usermod -a -G dialout $USER
+
+# 重新登录或重启终端
+```
+
+#### 2. 虚拟串口创建失败
+```bash
+# 检查socat是否安装
+which socat
+
+# 安装socat（Ubuntu/Debian）
+sudo apt-get install socat
+
+# 手动清理虚拟串口
+sudo rm -f /tmp/ttyV0 /tmp/ttyV1
+```
+
+#### 3. 节点启动失败
+```bash
+# 检查ROS环境
+echo $ROS_PACKAGE_PATH
+
+# 重新编译
+cd ~/catkin_ws
+catkin_make
+
+# 重新source环境
+source ~/catkin_ws/devel/setup.bash
+```
+
+#### 4. 话题无数据
+```bash
+# 检查话题列表
+rostopic list
+
+# 检查话题信息
+rostopic info /cmd_vel
+rostopic info /odom
+
+# 检查节点状态
+rosnode list
+rosnode info chassis_controller
+```
+
 ## 注意事项
 
-1. 确保串口设备有正确的读写权限
-2. 虚拟串口模拟器仅用于测试，实际使用时需要连接真实的串口设备
-3. 速度命令会被限制在设定的最大值范围内
-4. 当命令超时时，节点会自动发送停止命令
-5. 串口断开时，节点会自动尝试重连，无需手动重启
-6. 里程计发布频率会自动限制在0.1-1000Hz范围内，设置为≤0时将禁用里程计发布
-7. 即使禁用里程计发布，内部的里程计积分仍会继续进行，只是不发布消息
-8. 底盘状态监控发布频率会自动限制在0.1-100Hz范围内，设置为≤0时将禁用状态发布
+1. **权限要求**：确保串口设备有正确的读写权限
+2. **测试环境**：虚拟串口模拟器仅用于测试，实际使用时需要连接真实的串口设备
+3. **速度限制**：速度命令会被限制在设定的最大值范围内
+4. **超时保护**：当命令超时时，节点会自动发送停止命令
+5. **自动重连**：串口断开时，节点会自动尝试重连，无需手动重启
+6. **频率限制**：
+   - 里程计发布频率会自动限制在0.1-1000Hz范围内，设置为≤0时将禁用里程计发布
+   - 底盘状态监控发布频率会自动限制在0.1-100Hz范围内，设置为≤0时将禁用状态发布
+   - 电池状态发布频率会自动限制在0.1-100Hz范围内
+7. **内部状态**：即使禁用里程计发布，内部的里程计积分仍会继续进行，只是不发布消息
+8. **模块化设计**：各功能模块可以独立启用/禁用，便于根据实际需求进行配置
+9. **调试工具**：使用虚拟串口模拟器的`--show-packets`参数可以查看所有数据包传输，便于调试
+10. **测试脚本**：使用提供的测试脚本可以快速验证各项功能是否正常工作
