@@ -67,6 +67,8 @@ cd ~/catkin_ws/src/dr100/dr100_chassis_driver
 python3 tools/virtual_serial_simulator.py
 ```
 
+注：需要安装socat `sudo apt install socat`
+
 #### 虚拟串口模拟器高级用法
 ```bash
 # 基本启动
@@ -100,10 +102,27 @@ roslaunch dr100_chassis_driver chassis_controller_minimal.launch
 ### 4. 发送速度命令
 ```bash
 # 发送前进命令
-rostopic pub /cmd_vel geometry_msgs/Twist "linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}"
+rostopic pub -r 10 /cmd_vel geometry_msgs/Twist "linear:
+  x: 0.5
+  y: 0.0
+  z: 0.0
+angular:
+  x: 0.0
+  y: 0.0
+  z: 0.0"
 
 # 发送转向命令
-rostopic pub /cmd_vel geometry_msgs/Twist "linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.5}"
+rostopic pub -r 10 /cmd_vel geometry_msgs/Twist "linear:
+  x: 0.1
+  y: 0.0
+  z: 0.0
+angular:
+  x: 0.0
+  y: 0.0
+  z: 0.5"
+
+# 或者使用gui发布速度
+rosrun rqt_robot_steering rqt_robot_steering
 ```
 
 ### 5. 查看里程计信息
@@ -152,6 +171,7 @@ rosrun tf tf_echo robot_odom robot_base_link
 - `odom_frame_id`: 里程计坐标系名称（默认：odom）
 - `base_frame_id`: 机器人基座坐标系名称（默认：base_link）
 - `odom_publish_rate`: 里程计发布频率（默认：50.0 Hz，范围：0.1-1000 Hz，≤0时禁用发布）
+- `odom_publish_tf`: 是否发布TF变换（默认：false）
 - `reconnect_interval`: 重连尝试间隔时间（默认：2.0秒）
 - `max_reconnect_attempts`: 最大重连尝试次数（默认：-1，表示无限重试）
 - `battery_topic`: 电池状态话题名称（默认：/battery_state）
@@ -195,7 +215,7 @@ rosrun tf tf_echo robot_odom robot_base_link
 - 底盘诊断话题 (diagnostic_msgs/DiagnosticArray): 可通过`chassis_diagnostics_topic`参数配置，默认为`/chassis/diagnostics`
 
 ### 发布的TF变换
-- odom -> base_link: 机器人在里程计坐标系中的位置和姿态
+- odom -> base_link: 机器人在里程计坐标系中的位置和姿态（可通过`odom_publish_tf`参数控制是否发布）
 
 ## 里程计功能
 
@@ -206,9 +226,10 @@ rosrun tf tf_echo robot_odom robot_base_link
 3. **协方差矩阵**:
    - 静止时使用高精度协方差矩阵
    - 运动时使用标准协方差矩阵，考虑运动误差
-4. **TF发布**: 实时发布odom到base_link的坐标变换
+4. **TF发布**: 实时发布odom到base_link的坐标变换（可通过`odom_publish_tf`参数控制）
 5. **完整里程计**: 发布包含位置、姿态、速度和协方差的完整里程计信息
 6. **频率控制**: 可配置里程计发布频率，支持禁用里程计发布功能
+7. **TF控制**: 可独立控制是否发布TF变换，允许仅发布里程计消息而不发布TF
 
 ## 设备控制功能
 
@@ -339,6 +360,15 @@ python3 tools/test_device_switch.py reset
 
 <!-- 最低频率（0.1Hz，每10秒发布一次） -->
 <param name="odom_publish_rate" value="0.1" />
+```
+
+### TF发布配置示例
+```xml
+<!-- 启用TF发布 -->
+<param name="odom_publish_tf" value="true" />
+
+<!-- 禁用TF发布（默认，仅发布里程计消息，不发布TF变换） -->
+<param name="odom_publish_tf" value="false" />
 ```
 
 ### 重连参数配置示例

@@ -25,6 +25,9 @@
         <!-- 里程计发布频率参数 -->
         <param name="odom_publish_rate" value="50.0" />
 
+        <!-- 里程计TF发布参数 -->
+        <param name="odom_publish_tf" value="false" />
+
         <!-- 设备控制话题参数 -->
         <param name="light_topic" value="/light_switch" />
         <param name="ultrasonic_topic" value="/ultrasonic_switch" />

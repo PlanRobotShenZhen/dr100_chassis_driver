@@ -28,6 +28,7 @@ ChassisController::ChassisController()
     private_nh_.param("reconnect_interval", reconnect_interval_, 2.0);
     private_nh_.param("max_reconnect_attempts", max_reconnect_attempts_, -1);
     private_nh_.param("odom_publish_rate", odom_publish_rate_, 50.0);
+    private_nh_.param("odom_publish_tf", odom_publish_tf_, true);
     private_nh_.param<std::string>("battery_topic", battery_topic_, "/battery_state");
     private_nh_.param("battery_publish_rate", battery_publish_rate_, 10.0);
     private_nh_.param<std::string>("light_topic", light_topic_, "/light_switch");
@@ -51,8 +52,8 @@ ChassisController::ChassisController()
     private_nh_.param("enable_motor_enable", enable_motor_enable_, true);
     private_nh_.param("enable_chassis_status", enable_chassis_status_, true);
 
-    ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, battery_rate=%.1fHz",
-             port_name_.c_str(), baudrate_, odom_publish_rate_, battery_publish_rate_);
+    ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, odom_publish_tf=%s, battery_rate=%.1fHz",
+             port_name_.c_str(), baudrate_, odom_publish_rate_, odom_publish_tf_ ? "true" : "false", battery_publish_rate_);
     ROS_INFO("Device control topics: light=%s, ultrasonic=%s, charge=%s, lidar=%s",
              light_topic_.c_str(), ultrasonic_topic_.c_str(), charge_topic_.c_str(), lidar_topic_.c_str());
     ROS_INFO("Safety control topics: emergency=%s, motor_enable=%s",
@@ -84,7 +85,7 @@ bool ChassisController::initialize()
             std::bind(&ChassisController::onSerialError, this, std::placeholders::_1));
 
         // 初始化里程计发布模块
-        if (!odom_publisher_->initialize(nh_, odom_topic_, odom_frame_id_, base_frame_id_, odom_publish_rate_)) {
+        if (!odom_publisher_->initialize(nh_, odom_topic_, odom_frame_id_, base_frame_id_, odom_publish_rate_, odom_publish_tf_)) {
             ROS_ERROR("Failed to initialize odometry publisher");
             return false;
         }

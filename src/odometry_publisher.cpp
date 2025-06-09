@@ -10,6 +10,7 @@ OdometryPublisher::OdometryPublisher()
     , is_initialized_(false)
     , is_running_(false)
     , publish_enabled_(false)
+    , publish_tf_(true)
     , x_(0.0)
     , y_(0.0)
     , th_(0.0)
@@ -27,7 +28,7 @@ OdometryPublisher::~OdometryPublisher()
 
 bool OdometryPublisher::initialize(ros::NodeHandle& nh, const std::string& odom_topic,
                                  const std::string& odom_frame_id, const std::string& base_frame_id,
-                                 double publish_rate)
+                                 double publish_rate, bool publish_tf)
 {
     if (is_initialized_) {
         ROS_WARN("OdometryPublisher already initialized");
@@ -39,6 +40,7 @@ bool OdometryPublisher::initialize(ros::NodeHandle& nh, const std::string& odom_
     odom_frame_id_ = odom_frame_id;
     base_frame_id_ = base_frame_id;
     publish_rate_ = publish_rate;
+    publish_tf_ = publish_tf;
 
     // 检查发布频率设置
     publish_enabled_ = publish_rate_ > 0.0;
@@ -58,8 +60,8 @@ bool OdometryPublisher::initialize(ros::NodeHandle& nh, const std::string& odom_
     last_odom_time_ = ros::Time::now();
 
     is_initialized_ = true;
-    ROS_INFO("OdometryPublisher initialized: topic=%s, rate=%.1fHz", 
-             odom_topic_.c_str(), publish_enabled_ ? publish_rate_ : 0.0);
+    ROS_INFO("OdometryPublisher initialized: topic=%s, rate=%.1fHz, publish_tf=%s",
+             odom_topic_.c_str(), publish_enabled_ ? publish_rate_ : 0.0, publish_tf_ ? "true" : "false");
     return true;
 }
 
@@ -157,15 +159,17 @@ void OdometryPublisher::publishOdometry()
     // 创建通用头部
     auto header = createHeader(odom_frame_id_);
 
-    // 发布TF变换
-    geometry_msgs::TransformStamped odom_trans;
-    odom_trans.header = header;
-    odom_trans.child_frame_id = base_frame_id_;
-    odom_trans.transform.translation.x = x_;
-    odom_trans.transform.translation.y = y_;
-    odom_trans.transform.translation.z = 0.0;
-    odom_trans.transform.rotation = odom_quat;
-    odom_broadcaster_.sendTransform(odom_trans);
+    // 发布TF变换（如果启用）
+    if (publish_tf_) {
+        geometry_msgs::TransformStamped odom_trans;
+        odom_trans.header = header;
+        odom_trans.child_frame_id = base_frame_id_;
+        odom_trans.transform.translation.x = x_;
+        odom_trans.transform.translation.y = y_;
+        odom_trans.transform.translation.z = 0.0;
+        odom_trans.transform.rotation = odom_quat;
+        odom_broadcaster_.sendTransform(odom_trans);
+    }
 
     // 发布里程计消息
     nav_msgs::Odometry odom;

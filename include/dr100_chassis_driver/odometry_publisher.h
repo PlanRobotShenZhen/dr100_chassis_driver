@@ -20,7 +20,7 @@ public:
     // 初始化和控制
     bool initialize(ros::NodeHandle& nh, const std::string& odom_topic,
                    const std::string& odom_frame_id, const std::string& base_frame_id,
-                   double publish_rate = 50.0);
+                   double publish_rate = 50.0, bool publish_tf = true);
     void start();
     void stop();
 
@@ -50,6 +50,7 @@ private:
     std::string base_frame_id_;
     double publish_rate_;
     bool publish_enabled_;
+    bool publish_tf_;
 
     // 状态管理
     std::atomic<bool> is_initialized_;

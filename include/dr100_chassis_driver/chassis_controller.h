@@ -65,6 +65,7 @@ private:
     double reconnect_interval_;
     int max_reconnect_attempts_;
     double odom_publish_rate_;
+    bool odom_publish_tf_;
     double cmd_timeout_;
     std::string battery_topic_;
     double battery_publish_rate_;
