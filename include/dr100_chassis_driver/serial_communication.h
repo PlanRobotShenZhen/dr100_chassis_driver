@@ -23,11 +23,14 @@ public:
     ~SerialCommunication();
 
     // 初始化和控制
-    bool initialize(const std::string& port_name, int baudrate, 
+    bool initialize(const std::string& port_name, int baudrate,
                    double reconnect_interval = 2.0, int max_reconnect_attempts = -1);
     void start();
     void stop();
     bool isConnected() const;
+
+    // 调试功能
+    void setDebugOutput(bool enable) { debug_output_enabled_ = enable; }
 
     // 数据发送
     bool sendControlPacket(const ControlPacket& packet);
@@ -53,6 +56,9 @@ private:
 
     // 错误处理
     void handleSerialError(const char* error_msg);
+
+    // 调试输出
+    void printControlPacket(const ControlPacket& packet) const;
 
     // 串口相关
     serial::Serial serial_port_;
@@ -82,6 +88,9 @@ private:
     // 回调函数
     FeedbackCallback feedback_callback_;
     ErrorCallback error_callback_;
+
+    // 调试选项
+    std::atomic<bool> debug_output_enabled_{false};
 };
 
 } // namespace dr100_chassis_driver

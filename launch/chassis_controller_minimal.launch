@@ -61,5 +61,8 @@
         <!-- 重连参数 -->
         <param name="reconnect_interval" value="2.0" />
         <param name="max_reconnect_attempts" value="-1" />
+
+        <!-- 调试参数 -->
+        <param name="debug_output_enabled" value="false" />
     </node>
 </launch>

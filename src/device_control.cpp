@@ -87,13 +87,13 @@ bool DeviceControl::initialize(ros::NodeHandle& nh,
                                               &DeviceControl::motorEnableCallback, this);
         }
 
-        // 初始化设备状态为默认值（0表示保持状态）
+        // 初始化设备状态为默认值（0表示保持状态，电机使能默认开启）
         light_switch_.store(0);
         ultrasonic_switch_.store(0);
         charge_switch_.store(0);
         lidar_switch_.store(0);
         emergency_stop_.store(0);
-        motor_enable_.store(0);
+        motor_enable_.store(1);
 
         // 初始化时间戳
         const auto now = ros::Time::now();
@@ -362,7 +362,7 @@ void DeviceControl::resetSwitchThread()
         if (charge_enabled_) resetSwitchIfTimeout(charge_switch_, last_charge_time_, "charge");
         if (lidar_enabled_) resetSwitchIfTimeout(lidar_switch_, last_lidar_time_, "lidar");
         if (emergency_enabled_) resetSwitchIfTimeout(emergency_stop_, last_emergency_time_, "emergency_stop");
-        if (motor_enable_enabled_) resetSwitchIfTimeout(motor_enable_, last_motor_enable_time_, "motor_enable");
+        // if (motor_enable_enabled_) resetSwitchIfTimeout(motor_enable_, last_motor_enable_time_, "motor_enable");
     }
 
     ROS_DEBUG("DeviceControl reset thread stopped");

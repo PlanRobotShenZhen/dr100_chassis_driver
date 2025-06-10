@@ -98,6 +98,11 @@ bool SerialCommunication::sendControlPacket(const ControlPacket& packet)
 
         if (!isConnected()) return false;
 
+        // 调试输出：显示发送的数据包内容
+        if (debug_output_enabled_.load()) {
+            printControlPacket(packet);
+        }
+
         constexpr size_t packet_size = CONTROL_PACKET_SIZE;
         auto bytes_written = serial_port_.write(reinterpret_cast<const uint8_t*>(&packet), packet_size);
 
@@ -226,8 +231,12 @@ bool SerialCommunication::receiveFeedbackPacket(FeedbackPacket& packet)
         // 校验码验证
         uint8_t calculated_checksum = calculateChecksum(
             reinterpret_cast<const uint8_t*>(&packet), FEEDBACK_CHECKSUM_LENGTH);
-
-        return packet.checksum == calculated_checksum;
+        if (packet.checksum != calculated_checksum) {
+            ROS_WARN("Checksum error: received=0x%02X, calculated=0x%02X",
+                     packet.checksum, calculated_checksum);
+            return false;
+        }
+        return true;
 
     } catch (const std::exception&) {
         handleSerialError("Receive packet failed");
@@ -306,6 +315,35 @@ void SerialCommunication::handleSerialError(const char* error_msg)
     } else {
         ROS_ERROR("Serial error: %s", error_msg);
     }
+}
+
+void SerialCommunication::printControlPacket(const ControlPacket& packet) const
+{
+    // 显示十六进制格式的原始数据
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(&packet);
+    std::string hex_str;
+    for (size_t i = 0; i < CONTROL_PACKET_SIZE; ++i) {
+        char hex_byte[4];
+        snprintf(hex_byte, sizeof(hex_byte), "%02X ", data[i]);
+        hex_str += hex_byte;
+    }
+
+    ROS_INFO("Send Control Packet:");
+    ROS_INFO("  Hex: %s", hex_str.c_str());
+    // ROS_INFO("  帧头: 0x%02X", packet.frame_header);
+    // ROS_INFO("  电机使能: %u (0=保持, 1=开启, 2=关闭)", packet.motor_enable);
+    // ROS_INFO("  急停命令: %u (0=保持, 1=急停, 2=取消急停)", packet.emergency_stop);
+    // ROS_INFO("  车灯控制: %u (0=保持, 1=开启, 2=关闭)", packet.light_control);
+    // ROS_INFO("  X轴速度: %d (原始值) = %.3f m/s", packet.x_velocity, packet.x_velocity * INV_CONTROL_VEL_SCALE);
+    // ROS_INFO("  Y轴速度: %d (原始值) = %.3f m/s", packet.y_velocity, packet.y_velocity * INV_CONTROL_VEL_SCALE);
+    // ROS_INFO("  Z轴速度: %d (原始值) = %.3f rad/s", packet.z_velocity, packet.z_velocity * INV_CONTROL_VEL_SCALE);
+    // ROS_INFO("  超声波开关: %u (0=保持, 1=开启, 2=关闭)", packet.ultrasonic_switch);
+    // ROS_INFO("  充电开关: %u (0=保持, 1=开启, 2=关闭)", packet.charge_switch);
+    // ROS_INFO("  雷达开关: %u (0=保持, 1=开启, 2=关闭)", packet.lidar_switch);
+    // ROS_INFO("  预留字段1: %u", packet.reserved1);
+    // ROS_INFO("  预留字段2: %u", packet.reserved2);
+    // ROS_INFO("  校验码: 0x%02X", packet.checksum);
+    // ROS_INFO("  帧尾: 0x%02X", packet.frame_tail);
 }
 
 } // namespace dr100_chassis_driver

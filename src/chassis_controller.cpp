@@ -52,12 +52,16 @@ ChassisController::ChassisController()
     private_nh_.param("enable_motor_enable", enable_motor_enable_, true);
     private_nh_.param("enable_chassis_status", enable_chassis_status_, true);
 
+    // 调试参数
+    private_nh_.param("debug_output_enabled", debug_output_enabled_, false);
+
     ROS_INFO("ChassisController: port=%s, baudrate=%d, odom_rate=%.1fHz, odom_publish_tf=%s, battery_rate=%.1fHz",
              port_name_.c_str(), baudrate_, odom_publish_rate_, odom_publish_tf_ ? "true" : "false", battery_publish_rate_);
     ROS_INFO("Device control topics: light=%s, ultrasonic=%s, charge=%s, lidar=%s",
              light_topic_.c_str(), ultrasonic_topic_.c_str(), charge_topic_.c_str(), lidar_topic_.c_str());
     ROS_INFO("Safety control topics: emergency=%s, motor_enable=%s",
              emergency_topic_.c_str(), motor_enable_topic_.c_str());
+    ROS_INFO("Debug output enabled: %s", debug_output_enabled_ ? "true" : "false");
     ROS_INFO("Note: Program will continue running even if serial port is not available");
 }
 
@@ -77,6 +81,9 @@ bool ChassisController::initialize()
 
         // 初始化串口通信模块（总是成功，即使串口不存在）
         serial_comm_->initialize(port_name_, baudrate_, reconnect_interval_, max_reconnect_attempts_);
+
+        // 设置调试输出
+        serial_comm_->setDebugOutput(debug_output_enabled_);
 
         // 设置串口回调函数
         serial_comm_->setFeedbackCallback(

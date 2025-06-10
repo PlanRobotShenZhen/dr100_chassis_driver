@@ -90,6 +90,9 @@ private:
     bool enable_motor_enable_;
     bool enable_chassis_status_;
 
+    // 调试参数
+    bool debug_output_enabled_;
+
     // 状态变量
     std::atomic<bool> is_initialized_;
     std::atomic<bool> shutdown_requested_;

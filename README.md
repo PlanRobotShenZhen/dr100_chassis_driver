@@ -160,7 +160,7 @@ rosrun tf tf_echo robot_odom robot_base_link
 
 可以在launch文件中修改以下参数：
 
-- `port`: 串口设备路径（默认：/tmp/ttyV1）
+- `port`: 串口设备路径（默认：/dev/dr100_classis）
 - `baudrate`: 波特率（默认：115200）
 - `max_linear_velocity`: 最大线速度（默认：2.0 m/s）
 - `max_angular_velocity`: 最大角速度（默认：2.0 rad/s）
@@ -194,6 +194,7 @@ rosrun tf tf_echo robot_odom robot_base_link
 - `chassis_fault_status_topic`: 故障状态话题名称（默认：/chassis/fault_status）
 - `chassis_robot_status_topic`: 机器人系统状态话题名称（默认：/chassis/robot_status）
 - `chassis_diagnostics_topic`: 底盘诊断话题名称（默认：/chassis/diagnostics）
+- `debug_output_enabled`: 是否启用调试输出（默认：false）
 
 ## 话题
 
