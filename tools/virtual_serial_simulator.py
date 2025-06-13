@@ -235,7 +235,8 @@ class VirtualSerialSimulator:
 
                 if header_index > 0:
                     self.receive_buffer = self.receive_buffer[header_index:]
-
+                
+                # print(' '.join([f"{b:02X}" for b in self.receive_buffer]))
                 if len(self.receive_buffer) >= 17:
                     packet_data = bytes(self.receive_buffer[:17])
                     self.receive_buffer = self.receive_buffer[17:]

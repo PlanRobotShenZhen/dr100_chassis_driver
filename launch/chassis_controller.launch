@@ -3,7 +3,7 @@
     <!-- 底盘控制器节点 -->
     <node name="chassis_controller" pkg="dr100_chassis_driver" type="chassis_controller" output="screen">
         <!-- 串口参数 -->
-        <param name="port" value="/dev/dr100_classis" />
+        <param name="port" value="/dev/dr100_chassis" />
         <param name="baudrate" value="115200" />
         
         <!-- 速度限制参数 -->
@@ -48,15 +48,15 @@
         <!-- 设备启用参数 -->
         <param name="enable_light" value="false" />
         <param name="enable_ultrasonic" value="false" />
-        <param name="enable_charge" value="true" />
+        <param name="enable_charge" value="false" />
         <param name="enable_lidar" value="false" />
-        <param name="enable_emergency" value="true" />
-        <param name="enable_motor_enable" value="true" />
+        <param name="enable_emergency" value="false" />
+        <param name="enable_motor_enable" value="false" />
         <param name="enable_chassis_status" value="true" />
 
         <!-- 电池监控参数 -->
         <param name="battery_topic" value="/battery_state" />
-        <param name="battery_publish_rate" value="10.0" />
+        <param name="battery_publish_rate" value="0" />
 
         <!-- 重连参数 -->
         <param name="reconnect_interval" value="2.0" />

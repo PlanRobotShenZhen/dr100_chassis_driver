@@ -50,8 +50,8 @@
         <param name="enable_ultrasonic" value="false" />    <!-- 禁用超声波控制 -->
         <param name="enable_charge" value="false" />        <!-- 禁用充电控制 -->
         <param name="enable_lidar" value="false" />         <!-- 禁用雷达控制 -->
-        <param name="enable_emergency" value="true" />      <!-- 保留急停功能 -->
-        <param name="enable_motor_enable" value="true" />   <!-- 保留电机使能 -->
+        <param name="enable_emergency" value="false" />      <!-- 禁用急停功能 -->
+        <param name="enable_motor_enable" value="false" />   <!-- 禁用电机使能 -->
         <param name="enable_chassis_status" value="true" /> <!-- 保留底盘状态监控 -->
 
         <!-- 电池监控参数 -->
