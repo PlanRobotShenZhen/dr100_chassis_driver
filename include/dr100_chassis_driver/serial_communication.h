@@ -59,6 +59,7 @@ private:
 
     // 调试输出
     void printControlPacket(const ControlPacket& packet) const;
+    void printFeedbackPacket(const FeedbackPacket& packet) const;
 
     // 串口相关
     serial::Serial serial_port_;

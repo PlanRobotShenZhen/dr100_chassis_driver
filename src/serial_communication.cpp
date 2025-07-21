@@ -131,7 +131,6 @@ void SerialCommunication::setErrorCallback(const ErrorCallback& callback)
 bool SerialCommunication::initializeSerial()
 {
     try {
-        // 配置串口
         serial_port_.setPort(port_name_);
         serial_port_.setBaudrate(baudrate_);
         serial_port_.setTimeout(serial::Timeout::max(), 250, 0, 250, 0);
@@ -146,6 +145,10 @@ bool SerialCommunication::initializeSerial()
             serial_connected_ = false;
             return false;
         }
+
+        // 清空串口缓冲区
+        serial_port_.flushInput();
+        serial_port_.flushOutput();
 
         ROS_INFO("Serial port connected: %s", port_name_.c_str());
         serial_connected_ = true;
@@ -200,43 +203,48 @@ bool SerialCommunication::receiveFeedbackPacket(FeedbackPacket& packet)
 {
     try {
         constexpr size_t REMAINING_BYTES = FEEDBACK_PACKET_SIZE - 1;
-        constexpr size_t MIN_AVAILABLE = FEEDBACK_PACKET_SIZE;
 
-        // 快速检查可用数据
-        if (serial_port_.available() < MIN_AVAILABLE) return false;
+        // 检查可用数据
+        size_t available = serial_port_.available();
+        if (available == 0) return false;
 
-        // 寻找帧头
-        uint8_t byte;
-        while (serial_port_.available() > 0) {
-            serial_port_.read(&byte, 1);
-            if (byte == FRAME_HEADER) {
-                packet.frame_header = byte;
+        // 防止缓冲区堆积，超过阈值直接清空
+        if (available > 200) {
+            ROS_WARN("Serial buffer overflow (%zu bytes), flushing buffer", available);
+            serial_port_.flushInput();
+            return false;
+        }
+
+        // 读取所有可用数据
+        std::vector<uint8_t> buffer(available);
+        size_t bytes_read = serial_port_.read(buffer.data(), available);
+
+        // 从尾部找最后一个帧尾，然后向前定位帧头
+        int last_tail_pos = -1;
+        for (int i = bytes_read - 1; i >= FEEDBACK_PACKET_SIZE - 1; i--) {
+            if (buffer[i] == FRAME_TAIL) {
+                last_tail_pos = i;
                 break;
             }
         }
 
-        if (byte != FRAME_HEADER || serial_port_.available() < REMAINING_BYTES) {
-            return false;
+        if (last_tail_pos != -1) {
+            int header_pos = last_tail_pos - FEEDBACK_PACKET_SIZE + 1;
+            if (header_pos >= 0 && buffer[header_pos] == FRAME_HEADER) {
+                // 找到完整数据包，验证校验码
+                std::memcpy(&packet, &buffer[header_pos], FEEDBACK_PACKET_SIZE);
+                uint8_t calculated_checksum = calculateChecksum(
+                    reinterpret_cast<const uint8_t*>(&packet), FEEDBACK_CHECKSUM_LENGTH);
+                if (packet.checksum == calculated_checksum) {
+                    return true;
+                } else {
+                    ROS_WARN("Checksum error: received=0x%02X, calculated=0x%02X",
+                             packet.checksum, calculated_checksum);
+                }
+            }
         }
 
-        // 读取剩余数据
-        auto packet_ptr = reinterpret_cast<uint8_t*>(&packet) + 1;
-        auto bytes_read = serial_port_.read(packet_ptr, REMAINING_BYTES);
-
-        // 快速验证
-        if (bytes_read != REMAINING_BYTES || packet.frame_tail != FRAME_TAIL) {
-            return false;
-        }
-
-        // 校验码验证
-        uint8_t calculated_checksum = calculateChecksum(
-            reinterpret_cast<const uint8_t*>(&packet), FEEDBACK_CHECKSUM_LENGTH);
-        if (packet.checksum != calculated_checksum) {
-            ROS_WARN("Checksum error: received=0x%02X, calculated=0x%02X",
-                     packet.checksum, calculated_checksum);
-            return false;
-        }
-        return true;
+        return false;  // 没有找到有效数据包
 
     } catch (const std::exception&) {
         handleSerialError("Receive packet failed");
@@ -252,8 +260,15 @@ void SerialCommunication::processSerialData()
         if (!isConnected()) return;
 
         FeedbackPacket packet;
-        if (receiveFeedbackPacket(packet) && feedback_callback_) {
-            feedback_callback_(packet);
+        if (receiveFeedbackPacket(packet)) {
+            // 调试输出：显示接收的数据包内容
+            if (debug_output_enabled_.load()) {
+                printFeedbackPacket(packet);
+            }
+
+            if (feedback_callback_) {
+                feedback_callback_(packet);
+            }
         }
 
     } catch (const std::exception&) {
@@ -344,6 +359,21 @@ void SerialCommunication::printControlPacket(const ControlPacket& packet) const
     // ROS_INFO("  预留字段2: %u", packet.reserved2);
     // ROS_INFO("  校验码: 0x%02X", packet.checksum);
     // ROS_INFO("  帧尾: 0x%02X", packet.frame_tail);
+}
+
+void SerialCommunication::printFeedbackPacket(const FeedbackPacket& packet) const
+{
+    // 显示十六进制格式的原始数据
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(&packet);
+    std::string hex_str;
+    for (size_t i = 0; i < FEEDBACK_PACKET_SIZE; ++i) {
+        char hex_byte[4];
+        snprintf(hex_byte, sizeof(hex_byte), "%02X ", data[i]);
+        hex_str += hex_byte;
+    }
+
+    ROS_INFO("Received Feedback Packet:");
+    ROS_INFO("  Hex: %s", hex_str.c_str());
 }
 
 } // namespace dr100_chassis_driver
