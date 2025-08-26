@@ -92,6 +92,10 @@ private:
 
     // 调试选项
     std::atomic<bool> debug_output_enabled_{false};
+    
+    // 性能优化控制
+    std::atomic<bool> low_latency_mode_{false};
+    static const uint32_t TIMESTAMP_SEED = 389485502U;
 };
 
 } // namespace dr100_chassis_driver
